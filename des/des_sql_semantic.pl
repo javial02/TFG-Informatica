@@ -113,6 +113,7 @@ check_sql_semantic_error(_Lang,SQLst,RNVss,ARs) :-
   
 check_sql_semantic_error(_SQLst,_RNVss,_ARs) :-
   % Retrieve and display already detected semantic errors during parsing
+  %trace,
   semantic_error(M),
   sql_semantic_error_warning(M),
   fail.
@@ -726,6 +727,7 @@ bind_keys_and_consequents([_|FDs],Vs) :-
   bind_keys_and_consequents(FDs,Vs).
 
 
+%% ENTENDIDO!
 %% Error 3: Constant output column
 %%          Warn if a column becomes trivially constant when it is not projected as such
 %%   Examples:
@@ -737,7 +739,7 @@ bind_keys_and_consequents([_|FDs],Vs) :-
 
 check_sql_constant_column((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),[Rel|_]),[R|_Rs]) :-
   check_sql_constant_column(on),
-  rule_head(R,H),
+  rule_head(R,H),   %% extrae la cabeza de la regla
   H=..[_|Args],
   check_sql_constant_column_list(Args,Rel,Cs),
   !.
@@ -755,7 +757,7 @@ check_sql_constant_column_list([Arg|Args],Rel,[C|Cs]) :-
 check_sql_constant_column_list([_Arg|Args],Rel,[_C|Cs]) :-
   check_sql_constant_column_list(Args,Rel,Cs).
 
-  
+%% ENTENDIDO! 
 %% Error 4: Duplicated column values
 %%          Warn if two columns refer to the same expression
 %%   Examples:
@@ -768,7 +770,7 @@ check_sql_constant_column_list([_Arg|Args],Rel,[_C|Cs]) :-
 check_sql_duplicated_column_values((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),_AS),[R|_Rs]) :-
   Cs\=='*',      % Do not warn if retrieving all columns with '*'
   check_sql_duplicated_column_values(on),
-  rule_head(R,H),
+  rule_head(R,H), %%extrae la cabeza de la regla de datalog
   H=..[_|Args],
   extract_duplicates_var(Args,DVars),
   (DVars==[]
@@ -781,6 +783,7 @@ check_sql_duplicated_column_values((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),_AS
 check_sql_duplicated_column_values(_SQLst,_Rs).
   
 
+%% ENTENDIDO!
 %% Error 5: Unused tuple variable. Top 5
 %%          An unaccessed single relation in the FROM list from the root query (Error 27 captures all other cases)
 %%   Examples:
@@ -835,7 +838,7 @@ check_sql_unnecessary_join_goals([XG|Gs],NVs) :-
   term_variables(OArgs,OVars),
   length(OArgs,L),
   length(OVars,L), % Less variables means that some argument position is used
-% This is remarked for: SELECT Discurre.Nombre, Discurre.TopÛnimo FROM RÌos, Discurre WHERE RÌos.Nombre=Discurre.Nombre ORDER BY Discurre.Nombre;
+% This is remarked for: SELECT Discurre.Nombre, Discurre.TopÔøΩnimo FROM RÔøΩos, Discurre WHERE RÔøΩos.Nombre=Discurre.Nombre ORDER BY Discurre.Nombre;
   'NVs_relevant_vars'(OVars,NVs,[]),
   !,
   sql_semantic_error_warning(['Unnecessary join with "',RFKRel,'". There is a foreign key relating this with "',FKRel,'", and non-key attributes are not accessed.']),
@@ -863,6 +866,7 @@ relation_in_goals([_G|Gs],Rel,RG) :-
   relation_in_goals(Gs,Rel,RG).
 
 
+%% ENTENDIDO!
 %% Error 7: Tuple variables are always identical.
 %%          Processed before unfold_rules in cra_to_dl.
 %%   Examples:
@@ -879,15 +883,15 @@ check_sql_identical_tuples(_Lang,Rs) :-
   
 check_sql_identical_tuples([]).
 check_sql_identical_tuples([R|Rs]) :-
-  rule_body(R,B),
-  my_list_to_tuple(Bs,B),
+  rule_body(R,B),   %%guarda en B el cuerpo de la regla de Datalog
+  my_list_to_tuple(Bs,B),   %%guarda B en forma de lista
   check_sql_identical_tuples_goal_list(Bs),
   check_sql_identical_tuples(Rs).
 
 check_sql_identical_tuples_goal_list([_B]).
 check_sql_identical_tuples_goal_list([B|Bs]) :-
-  my_member_var(B,Bs),
-  B=..[Rel|Args],
+  my_member_var(B,Bs),    %%comprueba si B esta (repetido) en Bs
+  B=..[Rel|Args],   
   length(Args,L),
   user_predicate(Rel/L),
   !,
@@ -1013,6 +1017,7 @@ table_column_var_source_goals(V,[_G|Gs],TableColumn) :-
   table_column_var_source_goals(V,Gs,TableColumn).
 
 
+%% ENTENDIDO!
 %% Error 9: Comparison with NULL.
 %%   Examples:
 %%     create or replace table t(a string)
@@ -1029,7 +1034,7 @@ check_sql_null_comparison(SQLst) :-
   sql_semantic_error_warning(['Null comparison in: "','$exec'(write_sql_cond(G,0,'$des')),'". Consider using IS ',NOT,'NULL instead.']).
 check_sql_null_comparison(_SQLst).
   
-
+%% ENTENDIDO!
 %% Error 11: Unnecessary general comparison operator.
 %%           Warn if:
 %%             - LIKE '%' occurs, which is equivalent to IS NOT NULL
@@ -1037,7 +1042,7 @@ check_sql_null_comparison(_SQLst).
 %%           Additionally it warns about trivially true (resp. false) conditions as cte LIKE '%' (resp. NOT LIKE)
 %%             This would be checked by a string solver in Error 1
 %%   Examples:
-%%     select 1 from dual where 'a' like '%'
+%%     select 1 from dual where a like '%'
 %%       Warning: Condition ''a' $like '%'' can be better rewritten as ''a' IS NOT NULL'.
 %%     select 1 from dual where 'a' like '%' escape '%'
 %%       No warning (maybe for another reason: no wildcards)
@@ -1058,6 +1063,7 @@ check_sql_general_comparison(SQLst) :-
 check_sql_general_comparison(_SQLst).
 
 
+%% ENTENDIDO!
 %% Error 12: LIKE without wildcards.
 %%   Examples:
 %%     create or replace table t(a string)
@@ -1098,7 +1104,8 @@ escape_characters_from_expr(cte(C,string(_)),[C]) :-
 escape_characters_from_expr(_,[]) :-
   !.
 
-  
+
+%% ENTENDIDO!  
 %% Error 13: Unnecessarily complicated SELECT in EXISTS-subquery.
 %%   Examples:
 %%     create or replace table t(a int, b int)
@@ -1119,10 +1126,13 @@ check_sql_complicated_exists(_SQLst).
 %%           1- Warn if either MIN or MAX is used with a DISTINCT argument.
 %%           2- Warn if other aggregate is used with a DISTINCT expression involving key columns
 %%   Examples:
-%%     create or replace table t(a int primary key, b int unique);
+%%     create or replace table t(a int primary key, b int unique, c int);
 %%     select sum(distinct a)-avg(distinct b) from t where b>1 GROUP BY a,b HAVING count(a)>1;
 %%       Warning: Unnecesary DISTINCT in aggregate SUM for a key argument.
 %%       Warning: Unnecesary DISTINCT in aggregate AVG for a key argument.
+%%     select min(distinct c) from t;
+%%       Warning: [Sem] DISTINCT should not be applied to the argument of MIN.
+%%       This error is identified while parsing in des_sql.pl
 %%     select sum(a) from t;
 %%       No warning.
 
@@ -1372,6 +1382,7 @@ uncorrelated_relations([(G,Vs)|GVss],LVs,RRels) :-
     uncorrelated_relations(GVss,LLVs,RRels)).
   
 
+%% ENTENDIDO!
 %% Error 32: Strange HAVING.
 %%           Warn if a SELECT with HAVING does not include a GROUP BY.
 %%           Such a statement returns zero o a single tuple.
@@ -1382,12 +1393,13 @@ uncorrelated_relations([(G,Vs)|GVss],LVs,RRels) :-
 
 check_sql_having_wo_group_by((SQLst,_AS)) :-
   my_member_term(select(_AD,_T,_Of,_P,_TL,_F,_W,group_by([]),having(H),_O),SQLst),
-  H\==true,
+  H\==true,   %% clausula HAVING no vac√≠a
   !,
   sql_semantic_error_warning(['Found a HAVING clause with condition "','$exec'(write_sql_cond(H,0,'$des')),'" without a GROUP BY clause.']).
 check_sql_having_wo_group_by(_SQLst).
 
 
+%% ENTENDIDO!
 %% Error 33: SUM(DISTINCT ...) or AVG(DISTINCT ...) 
 %%           Warn if duplicate elimination is included for the argument of either SUM or AVG.
 %%           If included, this might not be an error, but it is suspicious because usually duplicates are relevant for these aggregates
