@@ -1,0 +1,19 @@
+% Prime numbers up to a bound
+
+number(0).
+number(X) :-
+  number(Y), 
+  Y<20, 
+  X is Y+1.
+
+factor(X,F) :-
+  number(X),
+  number(F),
+  X>F,
+  F>0,
+  X mod F = 0.
+  
+prime(X) :-
+  group_by(factor(X,F),[X],count=1).
+  
+:-solve(prime(X)).

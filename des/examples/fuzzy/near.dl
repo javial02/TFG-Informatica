@@ -1,0 +1,5 @@
+:- fuzzy_relation(near,[reflexive,symmetric,transitive(product)]).
+
+madrid near ciudad_real = 0.6.
+ciudad_real near badajoz = 0.4.
+badajoz near lisboa = 0.5.

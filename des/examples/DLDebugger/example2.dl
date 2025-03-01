@@ -1,0 +1,10 @@
+
+r(X) :- p(X),q(X). % i(r) = {(0)}
+% p(X) :- q(X).
+% q(X) :- p(X).
+p(X) :- p1(X),p2(Y),X>Y. % i(p) = {(0)} . Error X>Y should be X<Y
+q(X) :- q1(X),q2(Y),X<Y. % i(q) = {(0)}
+p1(0).
+p2(1).
+q1(0).
+q2(1).
