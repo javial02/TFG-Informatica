@@ -1511,25 +1511,37 @@ add(_, Kin, Kin).
 
 
 %%------------Meter en K todos los attr de las relaciones que tengan una primary key en K------------
-check_if_pk([],K,K):- !.
+
+
+check_if_pk([],_,Kout).
 
 check_if_pk([(Rname,_)|Rels], Kin, Kout):-
-  (my_primary_key('$des',Rname, Atts), %%sacamos la primary key de esa rel
-  %%ahora hay que comprobar si esa key esta en nuestro conjunto K
-  memberchk(Atts, Kin);),
-  %%guardamos todos los atributos de la tabla Rel en la lista As
-  findall(A, my_attribute('$des',_,Rname,A,_), As),
-  %%Unimos la nueva lista de atributos a nuestar K anterior y eliminamos duplicados
-  merge_lists(Kin, As, Kout),
+  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
+   ->check_attr_in_k(Atts, Kin),   %%guardamos todos los atributos de la tabla Rel en la lista As
+   findall(A, my_attribute('$des',_,Rname,A,_), As),
+   convert_to_attr(As, Attrs),
+   %%Unimos la nueva lista de atributos a nuestar K anterior y eliminamos duplicados
+   merge_lists(Kin, Attrs, Kmid),
+   Kout = Kmid
+   ; Kout = Kin), 
 
-  check_if_pk(Rels, Kin, Kout).
+  check_if_pk(Rels, Kmid, Kout).
 
 
-loop_add_check(_, _, K, K) :- !.  % Caso base: Si Kin == Kout, detener el bucle.
+
+
 loop_add_check(Cond, Rels,Kin, KoutFinal) :-
   add(Cond, Kin, Kmid),      
   check_if_pk(Rels, Kmid, Kout), 
-  loop_add_check(Cond, Rels, Kout, KoutFinal).
+  msort(Kmid, SortedKmid),
+  msort(Kout, SortedKout),
+  (SortedKmid == SortedKout 
+  -> KoutFinal = Kout
+  ;
+  loop_add_check(Cond, Rels, Kout, KoutFinal)).
+
+loop_add_check(_, _, K, K).  % Caso base: Si Kin == Kout, detener el bucle.
+
 
 
 
@@ -1537,10 +1549,27 @@ loop_add_check(Cond, Rels,Kin, KoutFinal) :-
 check_if_key_is_included(_, []):- !.     %%caso base
 
 check_if_key_is_included(K, [(Rname,_) | Rels]):-
-  (my_primary_key('$des',Rname, Atts), %%sacamos la primary key de esa rel
-  %%ahora hay que comprobar si esa key esta en nuestro conjunto K
-  memberchk(Atts, Kin);),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
+   ->check_attr_in_k(Atts, K)
+   ; true),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
   check_if_key_is_included(K, Rels).
+
+
+%%!!!!!!!!!!!!!!!!!!!Aqui tengo la duda de si deben estar todas las primary keys de la tabla incluidas o solo alguna!!!!!!!!!!!!!!!!
+check_attr_in_k([Att | Atts], K):-
+  (memberchk(attr(_,Att,_), K)
+  ->true
+  ;
+  check_attr_in_k(Atts, K)).
+
+check_attr_in_k([],_):- fail.
+
+
+convert_to_attr([As|Ass],[attr(_,As,_)|Res]):-
+  convert_to_attr(Ass, Res).
+
+convert_to_attr([],_):- !.
+  
 
 
 
