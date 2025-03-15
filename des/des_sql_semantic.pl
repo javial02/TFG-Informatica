@@ -149,7 +149,8 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_not_null_count(Rs,Bss),                       % Error 17
   check_sql_missing_join_cond(Bss,NVss),                  % Error 27
   check_sql_having_wo_group_by(SQLst),                    % Error 32
-  check_sql_distinct_sum_avg(Bss).                        % Error 33
+  check_sql_distinct_sum_avg(Bss),                        % Error 33
+  check_sql_unnec_distinct(SQLst).
   
   
 %% Error 1: Inconsistent condition.
@@ -1428,5 +1429,118 @@ sql_semantic_error_warning(Message) :-
 sql_semantic_error_warning(Message) :-
   append(Message,['$tbc'],ContMessage),
   write_warning_log(['[Sem] '|ContMessage]).
+
+
+%% ---------------AQUI EMPIEZO YO---------------------------------
+
+check_sql_unnec_distinct((select(_AD,_T,_Of,Cs,_TL,from(Rls),where(Cond),_G,_H,_O),_AS)) :-
+  extract_attributes(Cs, X),
+  %%hacer un sort para eliminar duplicados. sort(X, Xnueva)
+  sort(X, Xnueva),
+  extract_attributes_from_equalities_in_cnf(Cond, Res),
+  %hacer merge de Res con Xnueva y comprobar si se ordenan o no paraeliminar duplicados
+  merge_lists(Xnueva, Res, X2), 
+  %%Paso4: Hacer una cosa parecida a lo de las constantes, pero con attr, y comprobar con member_check, si el attr esta en el conjunto X
+  loop_add_check(Cond, Rls, X2, X3),
+  %%Paso5: Comprobar si las key de cada tabla estan en K
+  check_if_key_is_included(X3, Rls),
+  !,
+  %%!!!!!!!!!!!!!!!!!!!!!Falta diferencia rel caso en el que sea un Group By!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  sql_semantic_error_warning(['Using UNNECESSARY DISTINCT.']).
+
+check_sql_unnec_distinct(_SQLst).
+
+%%----------Paso2. Función para extraer atributos y comprobar que no son constantes----------
+extract_attributes([],[]).
+extract_attributes([expr(attr(A1, A2, A3), _, _)|Cs], [attr(A1, A2, A3)|As]):-
+  extract_attributes(Cs, As).  
   
-  
+%%----------Paso3. Extraer los attr que se comparan con cte en where-------------------------
+get_attr_from_cte_equality(attr(A1, A2, A3)=cte(_, _), attr(A1, A2, A3)).
+get_attr_from_cte_equality(cte(_, _) = attr(A1, A2, A3), attr(A1, A2, A3)).
+
+extract_attributes_from_equalities_in_cnf(Cond, [Attr]):-
+  get_attr_from_cte_equality(Cond, Attr),
+  !.
+
+extract_attributes_from_equalities_in_cnf(and(C1,C2), [Attr | Resto]):-
+  get_attr_from_cte_equality(C1, Attr),
+  !,
+  extract_attributes_from_equalities_in_cnf(C2, Resto).
+
+extract_attributes_from_equalities_in_cnf(and(_,C2), Resto):-
+  !,
+  extract_attributes_from_equalities_in_cnf(C2, Resto).
+
+extract_attributes_from_equalities_in_cnf(_Cond, []).
+
+%%----------Unir las listas--------------------------------------
+merge_lists(X, Y, Z):-
+  append(X,Y, Aux),     %%Juntamos la sods listas
+  remove_attr_duplicates(Aux, [], Z).  %%eliminamos duplicados pasandolo a conjunto
+
+remove_attr_duplicates([], Acc, Acc). % Caso base: lista vacía
+remove_attr_duplicates([attr(R, N, T)|Rest], Acc, Kout) :-
+    (member(attr(R, N, _), Acc) ->  % Si ya hay un attr con el mismo R y N...
+        remove_attr_duplicates(Rest, Acc, Kout)  % Lo ignoramos
+    ;
+        remove_attr_duplicates(Rest, [attr(R, N, T)|Acc], Kout) % Lo agregamos
+    ).
+ 
+
+%%----------Paso4. Bucle del algoritmo----------------------------------------------
+%%-----add(Cond, Kin, Kout) que añade los attr de la igualdad A = B a K----------
+add(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kout):-
+  (memberchk(attr(R1,N1,T1), Kin),
+  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
+  -> Kin1 = [attr(R2,N2,T2)|Kin]
+  ;  Kin1 = Kin ),
+  (Kin == Kin1 ,
+  memberchk(attr(R2,N2,T2), Kin1),
+  \+ memberchk(attr(R1,N1,T1), Kin1) %%\+ es not.
+  -> Kout = [attr(R1,N1,T1)|Kin1]
+  ;  Kout = Kin1).
+         
+
+
+add(and(C1,C2), Kin, Kout):-
+  add(C1, Kin, Kin1),
+  add(C2, Kin1, Kout).
+
+add(_, Kin, Kin).
+
+
+%%------------Meter en K todos los attr de las relaciones que tengan una primary key en K------------
+check_if_pk([],K,K):- !.
+
+check_if_pk([(Rname,_)|Rels], Kin, Kout):-
+  (my_primary_key('$des',Rname, Atts), %%sacamos la primary key de esa rel
+  %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+  memberchk(Atts, Kin);),
+  %%guardamos todos los atributos de la tabla Rel en la lista As
+  findall(A, my_attribute('$des',_,Rname,A,_), As),
+  %%Unimos la nueva lista de atributos a nuestar K anterior y eliminamos duplicados
+  merge_lists(Kin, As, Kout),
+
+  check_if_pk(Rels, Kin, Kout).
+
+
+loop_add_check(_, _, K, K) :- !.  % Caso base: Si Kin == Kout, detener el bucle.
+loop_add_check(Cond, Rels,Kin, KoutFinal) :-
+  add(Cond, Kin, Kmid),      
+  check_if_pk(Rels, Kmid, Kout), 
+  loop_add_check(Cond, Rels, Kout, KoutFinal).
+
+
+
+%%--------------Paso5. Iremos tabla por tabla para comprobar si las key estan en K----------------
+check_if_key_is_included(_, []):- !.     %%caso base
+
+check_if_key_is_included(K, [(Rname,_) | Rels]):-
+  (my_primary_key('$des',Rname, Atts), %%sacamos la primary key de esa rel
+  %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+  memberchk(Atts, Kin);),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+  check_if_key_is_included(K, Rels).
+
+
+
