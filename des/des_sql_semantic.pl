@@ -1433,7 +1433,8 @@ sql_semantic_error_warning(Message) :-
 
 %% ---------------AQUI EMPIEZO YO---------------------------------
 
-check_sql_unnec_distinct((select(_AD,_T,_Of,Cs,_TL,from(Rls),where(Cond),_G,_H,_O),_AS)) :-
+check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rls),where(Cond),group_by(Group),_H,_O),_AS)) :-
+  D == 'distinct',
   extract_attributes(Cs, X),
   %%hacer un sort para eliminar duplicados. sort(X, Xnueva)
   sort(X, Xnueva),
@@ -1443,9 +1444,11 @@ check_sql_unnec_distinct((select(_AD,_T,_Of,Cs,_TL,from(Rls),where(Cond),_G,_H,_
   %%Paso4: Hacer una cosa parecida a lo de las constantes, pero con attr, y comprobar con member_check, si el attr esta en el conjunto X
   loop_add_check(Cond, Rls, X2, X3),
   %%Paso5: Comprobar si las key de cada tabla estan en K
-  check_if_key_is_included(X3, Rls),
+  (Group == [] 
+    -> check_if_key_is_included(X3, Rls)
+    ;
+    check_if_group_by_in_k(X3, Group)),
   !,
-  %%!!!!!!!!!!!!!!!!!!!!!Falta diferencia rel caso en el que sea un Group By!!!!!!!!!!!!!!!!!!!!!!!!!!!
   sql_semantic_error_warning(['Using UNNECESSARY DISTINCT.']).
 
 check_sql_unnec_distinct(_SQLst).
@@ -1513,7 +1516,7 @@ add(_, Kin, Kin).
 %%------------Meter en K todos los attr de las relaciones que tengan una primary key en K------------
 
 
-check_if_pk([],_,Kout).
+check_if_pk([],_,_).
 
 check_if_pk([(Rname,_)|Rels], Kin, Kout):-
   (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
@@ -1569,7 +1572,14 @@ convert_to_attr([As|Ass],[attr(_,As,_)|Res]):-
   convert_to_attr(Ass, Res).
 
 convert_to_attr([],_):- !.
-  
+
+%% --------------Caso para el Group By-----------------
+check_if_group_by_in_k(_, []).
+
+check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
+  memberchk(attr(_,Attr,_), K),
+  check_if_group_by_in_k(K, Gps).
+
 
 
 
