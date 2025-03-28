@@ -152,7 +152,9 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_distinct_sum_avg(Bss),                        % Error 33
   check_sql_unnec_distinct(SQLst),                        % Error 2
   check_group_by_in_exists_subqry(SQLst),                 % Error 18
-  check_if_distinct_intead_of_groub_by(SQLst).            % Error 22
+  check_if_distinct_intead_of_groub_by(SQLst),            % Error 22
+  check_group_by_with_singleton_groups(SQLst),            % Error 19
+  check_group_by_only_with_one_group(SQLst).              % Error 20
   
   
 %% Error 1: Inconsistent condition.
@@ -1473,6 +1475,16 @@ extract_attributes_from_equalities_in_cnf(and(C1,C2), [Attr | Resto]):-
   !,
   extract_attributes_from_equalities_in_cnf(C2, Resto).
 
+%%Para el error 20
+extract_attributes_from_equalities_in_cnf(Cond, [Attr]):-
+  get_attr_from_subq_equality(Cond, Attr),
+  !.
+
+%%Para el error 20
+extract_attributes_from_equalities_in_cnf(and(C1,C2), [Attr | Resto]):-
+  get_attr_from_subq_equality(C1, Attr),
+  !,
+  extract_attributes_from_equalities_in_cnf(C2, Resto).
 extract_attributes_from_equalities_in_cnf(and(_,C2), Resto):-
   !,
   extract_attributes_from_equalities_in_cnf(C2, Resto).
@@ -1631,35 +1643,54 @@ check_if_k_in_group_by(Gps, [K | Ks]):-
 
 %%ERROR 19
 %%GROUP BY with singleton groups
+%%Examples: 
+%%    create table t(a int primary key, b int)
+%%    select a from t group by a 
+%%    create table s(a int, b int, primary key (a,b))
+%%    select a,b from s group by a,b
 
-
+%%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!falta implementar el caso en el que tengan dependencia funcional!!!!!!!!!!!!!!!!!!!!!!!!!
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
-
-
+  %%primero sacamos las primary key de las tablas y las guardamos en un conjunto
+  extract_primary_key(Rls, [], PksFinal),
+  check_if_group_by_in_k(PksFinal, Group),
+  !,
+  sql_semantic_error_warning(['GROUP BY with singleton groups']).
 
 check_group_by_with_singleton_groups(_SQLst).
 
+% Caso base: cuando la lista de relaciones está vacía, devolvemos la lista acumulada de claves primarias.
+extract_primary_key([], Pks, Pks).
 
-check_if_key_is_included(K, [(Rname,_) | Rels]):-
-  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
-   ->check_attr_in_k(Atts, K)
-   ; true),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
-  check_if_key_is_included(K, Rels).
-
-
-%%!!!!!!!!!!!!!!!!!!!Aqui tengo la duda de si deben estar todas las primary keys de la tabla incluidas o solo alguna!!!!!!!!!!!!!!!!
-check_attr_in_k([Att | Atts], K):-
-  (memberchk(attr(_,Att,_), K)
-  ->true
-  ;
-  check_attr_in_k(Atts, K)).
-
-check_attr_in_k([],_):- fail.
+% Caso recursivo: extraemos la clave primaria de la relación actual y la acumulamos en Pks.
+extract_primary_key([(Rname, _) | Rels], Pks, PksFinal) :-
+  my_primary_key('$des', Rname, Atts), % Obtener los atributos que forman la clave primaria.
+  complete_attr(Atts, Pk),            % Transformar la lista de atributos en la clave primaria.
+  merge_lists(Pk, Pks, PksUpdated),        % Agregar la clave primaria a la lista acumulada.
+  extract_primary_key(Rels, PksUpdated, PksFinal). % Continuar con el resto de las relaciones.
 
 
+complete_attr([],_).
 
-check_if_group_by_in_k(_, []).
+complete_attr([At | Ats], [attr(_,At,_)| Attrs]):-
+  complete_attr(Ats, Attrs).
 
-check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
-  memberchk(attr(_,Attr,_), K),
-  check_if_group_by_in_k(K, Gps).
+
+
+%%ERROR 20
+%%GROUP BY with only a single group
+
+
+check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
+  extract_attributes_from_equalities_in_cnf(Cond, Res),       %%extraemos los atributos que estan igualados a una constante en el where en forma normal conjuntiva (AND)
+  check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lsita de comparaciones del tipo a = cte()
+  !,
+  sql_semantic_error_warning(['GROUP BY with only a single group']).
+check_group_by_only_with_one_group(_SQLst).
+
+
+%% para hacer la comparacion de = con la subconsulta
+get_attr_from_subq_equality(attr(A1, A2, A3)=(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(A1, A2, A3)).
+get_attr_from_subq_equality((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS) = attr(A1, A2, A3), attr(A1, A2, A3)).
+get_attr_from_subq_equality('=_all'(attr(A1, A2, A3),(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS)), attr(A1, A2, A3)).
+get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(A1, A2, A3)), attr(A1, A2, A3)).
