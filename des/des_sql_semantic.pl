@@ -150,7 +150,9 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_missing_join_cond(Bss,NVss),                  % Error 27
   check_sql_having_wo_group_by(SQLst),                    % Error 32
   check_sql_distinct_sum_avg(Bss),                        % Error 33
-  check_sql_unnec_distinct(SQLst).
+  check_sql_unnec_distinct(SQLst),                        % Error 2
+  check_group_by_in_exists_subqry(SQLst),                 % Error 18
+  check_if_distinct_intead_of_groub_by(SQLst).            % Error 22
   
   
 %% Error 1: Inconsistent condition.
@@ -1449,7 +1451,7 @@ check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rls),where(Cond),group_by(
     ;
     check_if_group_by_in_k(X3, Group)),
   !,
-  sql_semantic_error_warning(['Using UNNECESSARY DISTINCT.']).
+  sql_semantic_error_warning(['Using unnecesary DISTINCT.']).
 
 check_sql_unnec_distinct(_SQLst).
 
@@ -1479,7 +1481,7 @@ extract_attributes_from_equalities_in_cnf(_Cond, []).
 
 %%----------Unir las listas--------------------------------------
 merge_lists(X, Y, Z):-
-  append(X,Y, Aux),     %%Juntamos la sods listas
+  append(X,Y, Aux),     %%Juntamos las dos listas
   remove_attr_duplicates(Aux, [], Z).  %%eliminamos duplicados pasandolo a conjunto
 
 remove_attr_duplicates([], Acc, Acc). % Caso base: lista vacía
@@ -1521,14 +1523,13 @@ check_if_pk([],_,_).
 check_if_pk([(Rname,_)|Rels], Kin, Kout):-
   (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
    ->check_attr_in_k(Atts, Kin),   %%guardamos todos los atributos de la tabla Rel en la lista As
-   findall(A, my_attribute('$des',_,Rname,A,_), As),
-   convert_to_attr(As, Attrs),
+   findall(attr(Rname,A,_), my_attribute('$des',_,Rname,A,_), As),
+   %%convert_to_attr(As, Attrs),
    %%Unimos la nueva lista de atributos a nuestar K anterior y eliminamos duplicados
-   merge_lists(Kin, Attrs, Kmid),
+   merge_lists(Kin, As, Kmid),
    Kout = Kmid
    ; Kout = Kin), 
-
-  check_if_pk(Rels, Kmid, Kout).
+   check_if_pk(Rels, Kmid, Kout).
 
 
 
@@ -1582,4 +1583,83 @@ check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
 
 
 
+%%ERROR 18
+%%Unnecesary Group by in Exists subquery
+%%Examples:
+%%    create table t(a int) 
+%%    create table s(a int, b int)
+%%    select a from t where exists (select a from s group by a)
 
+check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond))),_G,_H,_O),_AS)):-
+  check_group_by_and_having(Cond),
+  !,
+  sql_semantic_error_warning(['Using unnecesary GROUP BY in EXISTS Subquery.']).
+
+check_group_by_in_exists_subqry(_SQLst).
+check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having(H),_O),_AS)):-
+  Group \== [],
+  H == 'true'.
+
+
+
+%%ERROR 22
+%%GROUP BY can be replaced by DISTINCT
+%%Examples:
+%%    create table s(a int, b int)
+%%    select a,b from s group by a,b   
+
+check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(Group),_H,_O),_AS)):-
+  extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
+  check_if_group_by_in_k(X, Group),         %Comprobamos que cualquier atributo del group by esta en las columnas del select         
+  check_if_k_in_group_by(Group, X),         %Comprobamos que cualquier columna del select esta en los atributos del group by
+  !,
+  sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT']).
+
+check_if_distinct_intead_of_groub_by(_SQLst).
+
+
+
+%% --------------Caso contrario para ver si K en Group By-----------------
+check_if_k_in_group_by(_, []).
+
+check_if_k_in_group_by(Gps, [K | Ks]):-
+  memberchk(expr(K,_,_), Gps),
+  check_if_k_in_group_by(Gps, Ks).
+
+
+
+
+%%ERROR 19
+%%GROUP BY with singleton groups
+
+
+check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
+
+
+
+check_group_by_with_singleton_groups(_SQLst).
+
+
+check_if_key_is_included(K, [(Rname,_) | Rels]):-
+  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
+   ->check_attr_in_k(Atts, K)
+   ; true),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+  check_if_key_is_included(K, Rels).
+
+
+%%!!!!!!!!!!!!!!!!!!!Aqui tengo la duda de si deben estar todas las primary keys de la tabla incluidas o solo alguna!!!!!!!!!!!!!!!!
+check_attr_in_k([Att | Atts], K):-
+  (memberchk(attr(_,Att,_), K)
+  ->true
+  ;
+  check_attr_in_k(Atts, K)).
+
+check_attr_in_k([],_):- fail.
+
+
+
+check_if_group_by_in_k(_, []).
+
+check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
+  memberchk(attr(_,Attr,_), K),
+  check_if_group_by_in_k(K, Gps).

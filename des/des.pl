@@ -859,8 +859,8 @@ retract_prototype_views :-
 retract_prototype_views.
 
 retract_rand_records :-
-  retractall('$rand'(_GId,_F)),
-  retractall('$rand'(_GId,_S,_F)).
+  retractall('$rand'(_GId1,_F1)),
+  retractall('$rand'(_GId2,_S,_F2)).
   
 % Exception handling
 my_exception_handling(M) :- 
