@@ -154,7 +154,8 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_group_by_in_exists_subqry(SQLst),                 % Error 18
   check_if_distinct_intead_of_groub_by(SQLst),            % Error 22
   check_group_by_with_singleton_groups(SQLst),            % Error 19
-  check_group_by_only_with_one_group(SQLst).              % Error 20
+  check_group_by_only_with_one_group(SQLst),              % Error 20
+  check_if_attr_grp_by_is_unnec(SQLst).                   % Error 21
   
   
 %% Error 1: Inconsistent condition.
@@ -1679,6 +1680,11 @@ complete_attr([At | Ats], [attr(_,At,_)| Attrs]):-
 
 %%ERROR 20
 %%GROUP BY with only a single group
+%%Examples: 
+%%     create table s(a int, b int)
+%%     select a from t where a = all(select b from t) group by a
+%%     select a from t where a = (select b from t) group by a
+%%     select a from t where a = 3 group by a
 
 
 check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
@@ -1694,3 +1700,125 @@ get_attr_from_subq_equality(attr(A1, A2, A3)=(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,
 get_attr_from_subq_equality((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS) = attr(A1, A2, A3), attr(A1, A2, A3)).
 get_attr_from_subq_equality('=_all'(attr(A1, A2, A3),(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS)), attr(A1, A2, A3)).
 get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(A1, A2, A3)), attr(A1, A2, A3)).
+
+
+
+
+%%ERROR 21
+%%Unnecessary GROUP BY attribute
+%%Examples:
+%%    create table j(a int, b int) 
+%%    select a from j where a = b group by a,b
+%%    Bien -> select a from j where a = b group by a,b having b = 1
+
+%%!!!!!!!!!!!!!!!!!!!!!!!!!Falta tener en cuenta las dependencias funcionales!!!!!!!!!!!!!!!!!!!!!
+
+check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),having(Having),_O),_AS)):-
+  extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
+  add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
+  merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
+  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
+  extract_attr_from_group_by(Group, AttsGBY),     %%atributos presentes en el group by
+  check_attributes_from_grby(AttsGBY, Kfin, Dps),  %%guardamos los atributos del group by dependientes entre ellos en la lista Dps
+  validate_dps(Dps, K, Omit),                     %%comprobar cuales son los atributos de group by de podemos omitir
+  warning_message_21(Omit).                       %%imprimir mensaje
+
+check_if_attr_grp_by_is_unnec(_SQLst).
+
+
+%%----------------------Loop para añadir las dependencias del where------------
+loop_add(Cond, Kin, KoutFinal) :-
+  add3(Cond, Kin, Kmid),      
+  ( Kin \= Kmid 
+    -> loop_add(Cond, Kmid, KoutFinal)
+     ; KoutFinal = Kmid ).
+
+loop_add(_, K, K).  % Caso base: Si Kin == Kout, detener el bucle.
+
+add3(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kout):-
+  (%memberchk(attr(R1,N1,T1), Kin),
+  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
+  -> Kin1 = [attr(R2,N2,T2)|Kin]
+  ;  Kin1 = Kin ),
+  (Kin == Kin1 ,
+  %memberchk(attr(R2,N2,T2), Kin1),
+  \+ memberchk(attr(R1,N1,T1), Kin1) %%\+ es not.
+  -> Kout = [attr(R1,N1,T1)|Kin1]
+  ;  Kout = Kin1).
+         
+
+
+add3(and(C1,C2), Kin, Kout):-
+  add3(C1, Kin, Kin1),
+  add3(C2, Kin1, Kout).
+
+add3(_, Kin, Kin).
+
+
+%%-----------------Add para añadir los atr del having------------
+add2(attr(R, N, _) = _, Kin, Kout) :- 
+  %member(Op, [=, >, <, >=, =<]),
+  (\+ memberchk(attr(R,N,_), Kin)
+  ->  Kout = [attr(R, N, _)|Kin]
+  ;   Kout = Kin).
+add2(_ = attr(R, N, _), Kin, Kout) :- 
+  %member(Op, [=, >, <, >=, =<]),
+  (\+ memberchk(attr(R,N,_), Kin)
+  ->  Kout = [attr(R, N, _)|Kin]
+  ;   Kout = Kin).
+         
+
+add2(and(C1,C2), Kin, Kout):-
+  add2(C1, Kin, Kin1),
+  add2(C2, Kin1, Kout).
+
+add2(_, Kin, Kin).
+
+
+%%-------------------Extraer los atributos presentes en el group by------------
+
+extract_attr_from_group_by([], _Gbys).
+
+extract_attr_from_group_by([expr(attr(_,Attr,_),_,_) | Gps], [attr(_,Attr,_) | Gbys]):-
+  extract_attr_from_group_by(Gps, Gbys).
+
+
+
+%%------------------------Para ver que terminos del group by tienen dependencia directa--------------
+% Caso base: lista vacía produce lista vacía
+check_attributes_from_grby([], _, []).
+
+% Si el atributo está en Kfin, lo añadimos a ValidRest
+check_attributes_from_grby([Attr|Rest], Kfin, [Attr|ValidRest]) :-
+  memberchk(Attr, Kfin),  
+  check_attributes_from_grby(Rest, Kfin, ValidRest).
+
+% Si el atributo NO está en Kfin, simplemente lo ignoramos y seguimos
+check_attributes_from_grby([_Attr|Rest], Kfin, ValidRest) :-
+  check_attributes_from_grby(Rest, Kfin, ValidRest).
+
+%%--------------------------Funcion para sacar los atributos que se pueden omitir en el group by------
+% Predicado principal que comprueba el tamaño de Dps y filtra los elementos no presentes en K.
+validate_dps(Dps, K, Aux) :-
+  % Se verifica que Dps tenga al menos dos elementos
+  Dps = [_,_|_],
+  % Se filtran los elementos de Dps que no aparecen en K
+  filter_not_in(Dps, K, [], Aux).
+
+% Caso base: si la lista está vacía, la lista auxiliar también lo está.
+filter_not_in([], _K, AuxT, AuxT).
+
+% Si el elemento H no está en K, se agrega a la lista auxiliar.
+filter_not_in([H|T], K, AuxT, AuxT2) :-
+  (\+ memberchk(H, K)
+  -> AuxMid = [H|AuxT]
+  ; true),
+  filter_not_in(T, K, AuxMid, AuxT2).
+
+
+%%------------------------imprimir mensaje de error 21--------------
+warning_message_21([]).
+
+warning_message_21([attr(_,Oname,_)|Omit]):-
+  sql_semantic_error_warning(['Unnecessary GROUP BY attribute "',Oname, '".']),
+  warning_message_21(Omit).
