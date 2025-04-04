@@ -1654,6 +1654,7 @@ check_if_k_in_group_by(Gps, [K | Ks]):-
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
   %%primero sacamos las primary key de las tablas y las guardamos en un conjunto
   extract_primary_key(Rls, [], PksFinal),
+  %%check_func_deps()
   check_if_group_by_in_k(PksFinal, Group),
   !,
   sql_semantic_error_warning(['GROUP BY with singleton groups']).
@@ -1712,13 +1713,15 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    Bien -> select a from j where a = b group by a,b having b = 1
 
 %%!!!!!!!!!!!!!!!!!!!!!!!!!Falta tener en cuenta las dependencias funcionales!!!!!!!!!!!!!!!!!!!!!
-
-check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),having(Having),_O),_AS)):-
+%%create table t(a int primary key, b string determined by a);
+%% my_functional_dependency('$des', t, [a], [b]).
+check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
   loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
   extract_attr_from_group_by(Group, AttsGBY),     %%atributos presentes en el group by
+  check_func_deps(Rels, AttsGBY, [], Kfunc),
   check_attributes_from_grby(AttsGBY, Kfin, Dps),  %%guardamos los atributos del group by dependientes entre ellos en la lista Dps
   validate_dps(Dps, K, Omit),                     %%comprobar cuales son los atributos de group by de podemos omitir
   warning_message_21(Omit).                       %%imprimir mensaje
@@ -1822,3 +1825,15 @@ warning_message_21([]).
 warning_message_21([attr(_,Oname,_)|Omit]):-
   sql_semantic_error_warning(['Unnecessary GROUP BY attribute "',Oname, '".']),
   warning_message_21(Omit).
+
+
+
+
+%%create table t(a int primary key, b string determined by a);
+%% my_functional_dependency('$des', t, [a], [b]).
+%%----------------------Para comprobar si hay dependencias----------------
+check_func_deps([], _ , K, K).
+
+check_func_deps([(Rname,_)| Rels], Gbpy, Kin, Kfunc):-
+  my_functional_dependency('$des', Rname, Gbpy, Kmid),
+  check_func_deps(Rels, Gbpy, Kmid, Kfunc).
