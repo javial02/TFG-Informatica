@@ -1529,8 +1529,6 @@ add(_, Kin, Kin).
 
 
 %%------------Meter en K todos los attr de las relaciones que tengan una primary key en K------------
-
-
 check_if_pk([],_,_).
 
 check_if_pk([(Rname,_)|Rels], Kin, Kout):-
@@ -1596,9 +1594,9 @@ check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
 
 
 
-%%ERROR 18
-%%Unnecesary Group by in Exists subquery
-%%Examples:
+%% ERROR 18
+%% Unnecesary Group by in Exists subquery
+%% Examples:
 %%    create table t(a int) 
 %%    create table s(a int, b int)
 %%    select a from t where exists (select a from s group by a)
@@ -1609,15 +1607,16 @@ check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond)
   sql_semantic_error_warning(['Using unnecesary GROUP BY in EXISTS Subquery.']).
 
 check_group_by_in_exists_subqry(_SQLst).
+
 check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having(H),_O),_AS)):-
-  Group \== [],
-  H == 'true'.
+  Group \== [],         %si el apartado de group by no es vacío
+  H == 'true'.          %si el apartado de having está vacío
 
 
 
-%%ERROR 22
-%%GROUP BY can be replaced by DISTINCT
-%%Examples:
+%% ERROR 22
+%% GROUP BY can be replaced by DISTINCT
+%% Examples:
 %%    create table s(a int, b int)
 %%    select a,b from s group by a,b   
 
@@ -1625,11 +1624,11 @@ check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(Gro
   extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
   check_if_group_by_in_k(X, Group),         %Comprobamos que cualquier atributo del group by esta en las columnas del select         
   check_if_k_in_group_by(Group, X),         %Comprobamos que cualquier columna del select esta en los atributos del group by
+  %%!!!!!!!!!!!!!!! a lo mejor si lo paso todo a conjunto en vez de a lista podemos comprobarlo con ==!!!!!!!!!!!!!!!!!!!!!
   !,
   sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT']).
 
 check_if_distinct_intead_of_groub_by(_SQLst).
-
 
 
 %% --------------Caso contrario para ver si K en Group By-----------------
@@ -1642,55 +1641,89 @@ check_if_k_in_group_by(Gps, [K | Ks]):-
 
 
 
-%%ERROR 19
-%%GROUP BY with singleton groups
-%%Examples: 
+%% ERROR 19
+%% GROUP BY with singleton groups
+%% Examples: 
 %%    create table t(a int primary key, b int)
 %%    select a from t group by a 
 %%    create table s(a int, b int, primary key (a,b))
 %%    select a,b from s group by a,b
 
-%%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!falta implementar el caso en el que tengan dependencia funcional!!!!!!!!!!!!!!!!!!!!!!!!!
+%%create table t(a int primary key, b string determined by a);
+%% my_functional_dependency('$des', t, [a], [b]).
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
-  %%primero sacamos las primary key de las tablas y las guardamos en un conjunto
-  extract_primary_key(Rls, [], PksFinal),
-  %%check_func_deps()
-  check_if_group_by_in_k(PksFinal, Group),
+  extract_pks_and_df_from_gby(Rls, Group, [], K),       %%sacamos las pks y df
+  check_if_k_in_group_by(Group, K),                     %%comprobamos que los conjuntos de GROUP BY y el de pk-df son iguales
+  check_if_group_by_in_k(K, Group),
   !,
   sql_semantic_error_warning(['GROUP BY with singleton groups']).
 
 check_group_by_with_singleton_groups(_SQLst).
 
-% Caso base: cuando la lista de relaciones está vacía, devolvemos la lista acumulada de claves primarias.
-extract_primary_key([], Pks, Pks).
 
-% Caso recursivo: extraemos la clave primaria de la relación actual y la acumulamos en Pks.
-extract_primary_key([(Rname, _) | Rels], Pks, PksFinal) :-
+extract_pks_and_df_from_gby([], _, K, K).
+
+extract_pks_and_df_from_gby([(Rname, _) | Rels], Group, Kini, KFinal):-
   my_primary_key('$des', Rname, Atts), % Obtener los atributos que forman la clave primaria.
-  complete_attr(Atts, Pk),            % Transformar la lista de atributos en la clave primaria.
-  merge_lists(Pk, Pks, PksUpdated),        % Agregar la clave primaria a la lista acumulada.
-  extract_primary_key(Rels, PksUpdated, PksFinal). % Continuar con el resto de las relaciones.
+  complete_attr(Atts, Attrs),
+  check_if_is_pk(Attrs, Group, [], Pk), %Comprobamos las pk
+  merge_lists(Pk, Kini, Kmid1),
+  (my_functional_dependency('$des', Rname, PrimK, Dp) 
+  -> (complete_attr(PrimK,Pks),
+  (member_chck_attr(Pk, Pks)
+  ->  (complete_attr(Dp, Dps),
+  check_if_is_df(Dps, Group, [], Dpss),
+  merge_lists(Kmid1, Dpss, Kmid2))
+  ; true))
+  ; Kmid2 = Kmid1),  %%extraer dependencias funcionales ligados a la PK
+  
+  extract_pks_and_df_from_gby(Rels, Group, Kmid2, KFinal).
 
+%%-----------Extraer si algun attr del Group by coincide con una PK dada--------------------------
+check_if_is_pk(_, [], Pks, Pks).
 
-complete_attr([],_).
+check_if_is_pk(Atts, [expr(attr(_,Attr,_),_,_) | Gps], Pks, PksFinal):-
+  (memberchk(attr(_,Attr,_), Atts)
+    -> Pkmid = [attr(_,Attr,_)| Pks]
+    ; Pkmid = Pks),
+  check_if_is_pk(Atts, Gps, Pkmid, PksFinal).
+
+%%-----------Extraer si algun attr del Group by coincide con una DF dada--------------------------
+check_if_is_df(_, [], Dps, Dps).
+
+check_if_is_df(Dp, [expr(attr(_,Attr,_),_,_) | Gps], Dpini, DpFinal):-
+  (memberchk(attr(_,Attr,_), Dp)
+  -> Dpmid = [attr(_,Attr,_)| Dpini]
+  ; Dpmid = Dpini),
+  check_if_is_df(Dp, Gps, Dpmid, DpFinal).
+
+%% completar atributos
+complete_attr([],[]).
 
 complete_attr([At | Ats], [attr(_,At,_)| Attrs]):-
-  complete_attr(Ats, Attrs).
+  complete_attr(Ats,Attrs).
 
 
+member_chck_attr([], _).
+member_chck_attr([attr(_,At,_)|Attr], K):-
+  memberchk(attr(_,At,_), K),
+  member_chck_attr(Attr, K).
 
-%%ERROR 20
-%%GROUP BY with only a single group
-%%Examples: 
-%%     create table s(a int, b int)
+
+%% ERROR 20
+%% GROUP BY with only a single group
+%% Examples: 
+%%     create table t(a int, b int)
 %%     select a from t where a = all(select b from t) group by a
 %%     select a from t where a = (select b from t) group by a
 %%     select a from t where a = 3 group by a
 
 
+%%!!!!!!!!!!!!!!Aqui habría que comprobar que si los atributos del group by estan en el select, entonces no es error, a pesar de que solo sea un grupo y se imprima una columna constante???!!!!!!!!!!
+%%!!!!!!!!!!!!!!! si son las mismas coumnas de select las del group by salta error de DISTINCT!!!!!!!!!!!!!!!!!!!!!!!!
 check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
   extract_attributes_from_equalities_in_cnf(Cond, Res),       %%extraemos los atributos que estan igualados a una constante en el where en forma normal conjuntiva (AND)
-  check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lsita de comparaciones del tipo a = cte()
+  check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lista de comparaciones del tipo a = cte()
   !,
   sql_semantic_error_warning(['GROUP BY with only a single group']).
 check_group_by_only_with_one_group(_SQLst).
@@ -1705,14 +1738,15 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 
 
 
-%%ERROR 21
-%%Unnecessary GROUP BY attribute
-%%Examples:
+%% ERROR 21
+%% Unnecessary GROUP BY attribute
+%% Examples:
 %%    create table j(a int, b int) 
 %%    select a from j where a = b group by a,b
 %%    Bien -> select a from j where a = b group by a,b having b = 1
 
 %%!!!!!!!!!!!!!!!!!!!!!!!!!Falta tener en cuenta las dependencias funcionales!!!!!!!!!!!!!!!!!!!!!
+%%!!!!!!!!!!!!!!!!!!!!!!!!!Falyta comprobar las igualdades de constantes tmb !!!!!!!!!!!!!!!!!!!!!
 %%create table t(a int primary key, b string determined by a);
 %% my_functional_dependency('$des', t, [a], [b]).
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
