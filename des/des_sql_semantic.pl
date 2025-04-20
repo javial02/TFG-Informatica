@@ -156,7 +156,8 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_group_by_with_singleton_groups(SQLst),            % Error 19
   check_group_by_only_with_one_group(SQLst),              % Error 20
   check_if_attr_grp_by_is_unnec(SQLst),                   % Error 21
-  check_if_union_by_or(SQLst).                             % Error 23
+  check_if_union_by_or(SQLst),                            % Error 23
+  check_if_ord_by_is_unnec(SQLst).                        % Error 24
   
   
 %% Error 1: Inconsistent condition.
@@ -1758,6 +1759,7 @@ member_chck_attr([attr(_,At,_)|Attr], K):-
 %%!!!!!!!!!!!!!!Aqui habría que comprobar que si los atributos del group by estan en el select, entonces no es error, a pesar de que solo sea un grupo y se imprima una columna constante???!!!!!!!!!!
 %%!!!!!!!!!!!!!!! si son las mismas coumnas de select las del group by salta error de DISTINCT!!!!!!!!!!!!!!!!!!!!!!!!
 check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
+  Group \== [],
   extract_attributes_from_equalities_in_cnf(Cond, Res),       %%extraemos los atributos que estan igualados a una constante en el where en forma normal conjuntiva (AND)
   check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lista de comparaciones del tipo a = cte()
   !,
@@ -1785,9 +1787,6 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    select a from t  group by a,b 
 %%    Bien -> select a,b from t group by a,b 
 
-%%!!!!!!!!!!!!!!!!!!!!!!!!!Falta tener en cuenta las dependencias funcionales!!!!!!!!!!!!!!!!!!!!!
-%%create table t(a int primary key, b string determined by a);
-%% my_functional_dependency('$des', t, [a], [b]).
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
@@ -1942,67 +1941,81 @@ check_if_union_by_or(_SQLst).
 
 %% ERROR 24:
 %% Unnecessary ORDER BY term.
-%% muy parecido a los del group by
+%%    create table t(a int, b int)
+%%    select a from t where a = b order by a, b
+%%    create table t(a int primary key, b string determined by a)
+%%    select a from t order by a, b
 
 %%HAY QUE RESPETAR EL ORDEN???? como busco cuáles son los siguientes de la lista de ordby que cumplen esa condicion de DF?????
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(Order,_N)),_AS)):-
   extract_attr_from_order_by(Order, Oby),
-  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
-
-
-
+  %%reverse(Oby, Ordby),
+  check_func_deps_order_by(Oby, [], Rels, Cond).
 
 check_if_ord_by_is_unnec(_SQLst).
 
-extract_attr_from_order_by([], _Obys).
 
-extract_attr_from_order_by([expr(attr(_,Attr,_),_,_) | Ops], [attr(_,Attr,_) | Obys]):-
+%%--------------Extraer los atributos del order by--------------
+extract_attr_from_order_by([], []).
+
+extract_attr_from_order_by([expr(attr(Rel,Attr,_),_,_) | Ops], [attr(Rel,Attr,_) | Obys]):-
   extract_attr_from_order_by(Ops, Obys).
 
-check_func_deps([], _ , K, K).
 
-%%ESTO ESTA MAAAAAAL QUE HACEMOS CON KIN
-check_func_deps([(Rname,_)| Rels], Gbpy, Kin, Kfunc):-
-  my_functional_dependency('$des', Rname, Gbpy, Kmid),
-  check_func_deps(Rels, Gbpy, Kmid, Kfunc).
+%%----------Funcion para ver las dep funcionales del order by-----------------
+
+check_func_deps_order_by([],_,_,_).
+
+check_func_deps_order_by([attr(R, Attr,_) | Obys], Prevs, Rels, Cond):-
+  add4(Cond, [attr(R, Attr, _)], [], Ktemp),
+( equal_attr(Ktemp, [attr(R, Attr, _)]) 
+  -> Kout = []
+  ;  Kout = Ktemp),
+  check_if_df(Rels, Prevs, [attr(R, Attr,_)], [], Dfs),
+  merge_lists(Kout, Dfs, Dfss),
+  sort(Dfss, Dfssnuevo),
+  sort(Prevs, Prevsnuevo),
+  ((equal_attr(Dfssnuevo, Prevsnuevo), Dfssnuevo \== [])
+  -> sql_semantic_error_warning(['Unnecessary ORDER BY term "',Attr,'".'])
+  ; true),
+  check_func_deps_order_by(Obys, [attr(R, Attr,_) | Prevs], Rels, Cond).
 
 
-/*
-%% ERROR 25:
-%% Inefficient HAVING
-%% Aquí hay que comprobar que, independientemente de que haya cláusula WHERE o no,
-%% si hay cláusula HAVING con condiciones como =, >, < y
-%% no hay funciones de agregación de por medio (avg, min, max, etc.),
-%% entonces salta el error.
-%% Aggr = sum_distinct(V) ; avg_distinct(V) ; times_distinct(V) ; count_distinct(V)
 
-check_if_inefficient_having((
-    select(_D, _T, _Of, Cs, _TL, _F, where(Cond), _G, having(Having), _O), _AS)) :- 
-    Having \== true,                        %% Si hay cláusula HAVING
-    extract_attributes(Cs, Kselect),       %% Guardamos los atributos del SELECT en Kselect
-    add2(Having, [], Khave),               %% Guardamos en Khave los atributos del HAVING
-    merge_lists(Kselect, Khave, K),        %% Combinamos SELECT + HAVING en K
-    valid_list(K),                         %% Validamos que no haya funciones de agregación
-    sql_semantic_error_warning(['Inefficient HAVING.']).  %% Lanzamos el warning
+%%------------Comprobar si hay dependencia funcional de un attr con alguno de los anteriores del order by------
 
-check_if_inefficient_having(_SQLst).
-%% En cualquier otro caso, no hacemos nada.
+check_if_df([],_,_,K,K).
 
-% valid_list/1: verifica que todos los elementos de una lista sean válidos (sin agregación)
-valid_list([]).  % Caso base: lista vacía es válida
-valid_list([H|T]) :-
-    valid_element(H),
-    valid_list(T).
+check_if_df([(Rname, [Rel|_]) | Rels], Prevs, Attr, Kin, Kout):-
+  (my_functional_dependency('$des', Rname, PrimK, Dp) 
+  -> (complete_attr(Rel,PrimK,Pks),
+  (member_chck_attr(Pks, Prevs)
+  ->  (complete_attr(Rel,Dp, Dps),
+  check_if_is_df(Rel,Dps, Attr, [], _), 
+  merge_lists(Kin, Pks, Kmid))
+  ; Kmid = Kin)); true),
+  check_if_df(Rels, Prevs, Attr, Kmid, Kout).
 
-% valid_element/1: verdadero si X no es una función de agregación prohibida
-valid_element(X) :-
-    X \== sum_distinct(_),
-    X \== avg_distinct(_),
-    X \== times_distinct(_),
-    X \== count_distinct(_).
-*/
+%%------------- add modificado------------------
+add4(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kin2, Kout):-
+  (memberchk(attr(R1,N1,T1), Kin),
+  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
+  -> Kin1 = [attr(R2,N2,T2)|Kin2]
+  ;  Kin1 = Kin2 ),
+  (
+  memberchk(attr(R2,N2,T2), Kin),
+  \+ memberchk(attr(R1,N1,T1), Kin) %%\+ es not.
+  -> Kout = [attr(R1,N1,T1)|Kin1]
+  ;  Kout = Kin1).
+         
 
+
+add4(and(C1,C2), Kin, Kin2, Kout):-
+  add4(C1, Kin, Kin2, Kin1),
+  add4(C2, Kin1,Kin2, Kout).
+
+add4(_, _, _,[]).
 
 %% ERROR 26:
 %% Inefficient UNION
