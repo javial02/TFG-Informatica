@@ -155,7 +155,8 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_if_distinct_intead_of_groub_by(SQLst),            % Error 22
   check_group_by_with_singleton_groups(SQLst),            % Error 19
   check_group_by_only_with_one_group(SQLst),              % Error 20
-  check_if_attr_grp_by_is_unnec(SQLst).                   % Error 21
+  check_if_attr_grp_by_is_unnec(SQLst),                   % Error 21
+  check_if_union_by_or(SQLst).                             % Error 23
   
   
 %% Error 1: Inconsistent condition.
@@ -1570,7 +1571,6 @@ check_if_key_is_included(K, [(Rname,_) | Rels]):-
   check_if_key_is_included(K, Rels).
 
 
-%%!!!!!!!!!!!!!!!!!!!Aqui tengo la duda de si deben estar todas las primary keys de la tabla incluidas o solo alguna!!!!!!!!!!!!!!!!
 check_attr_in_k([Att | Atts], K):-
   (memberchk(attr(_,Att,_), K)
   ->true
@@ -1604,13 +1604,13 @@ check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
 check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond))),_G,_H,_O),_AS)):-
   check_group_by_and_having(Cond),
   !,
-  sql_semantic_error_warning(['Using unnecesary GROUP BY in EXISTS Subquery.']).
+  sql_semantic_error_warning(['Using unnecesary GROUP BY in EXISTS subquery.']).
 
 check_group_by_in_exists_subqry(_SQLst).
 
 check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having(H),_O),_AS)):-
   Group \== [],         %si el apartado de group by no es vacío
-  H == 'true'.          %si el apartado de having está vacío
+  H == true.          %si el apartado de having está vacío
 
 
 
@@ -1621,22 +1621,38 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having
 %%    select a,b from s group by a,b   
 
 check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(Group),_H,_O),_AS)):-
+  Group \== [],
   extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
-  check_if_group_by_in_k(X, Group),         %Comprobamos que cualquier atributo del group by esta en las columnas del select         
-  check_if_k_in_group_by(Group, X),         %Comprobamos que cualquier columna del select esta en los atributos del group by
-  %%!!!!!!!!!!!!!!! a lo mejor si lo paso todo a conjunto en vez de a lista podemos comprobarlo con ==!!!!!!!!!!!!!!!!!!!!!
+  extract_attr_from_group_by(Group, Gby),
+  sort(X, Xsort),
+  sort(Gby, Gbysort),
+  equal_attr(Xsort, Gbysort),         %%tengo que crearme una funcion para comparar porque el == me da siempre falso por el tercer parametro de los atributos
   !,
-  sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT']).
+  sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT.']).
 
 check_if_distinct_intead_of_groub_by(_SQLst).
 
 
-%% --------------Caso contrario para ver si K en Group By-----------------
-check_if_k_in_group_by(_, []).
+%%-------------------Extraer los atributos del Group By--------------------
+extract_attr_from_group_by([], []).
 
-check_if_k_in_group_by(Gps, [K | Ks]):-
-  memberchk(expr(K,_,_), Gps),
-  check_if_k_in_group_by(Gps, Ks).
+extract_attr_from_group_by([expr(attr(Rel,Attr,_),_,_) | Gps], [attr(Rel,Attr,_) | Gbys]):-
+  extract_attr_from_group_by(Gps, Gbys).
+
+%%------------------Comprobar que las listas de atributos son iguales (sin tener en cuenta eel tercer parametro de attr)-------------
+equal_attr([], []).
+equal_attr([attr(A1,B1,_)|T1], [attr(A2,B2,_)|T2]) :-
+    A1 == A2,
+    B1 == B2,
+    equal_attr(T1, T2).
+
+
+%% --------------Caso contrario para ver si K en Group By-----------------
+%%check_if_k_in_group_by(_, []).
+
+%%check_if_k_in_group_by(Gps, [K | Ks]):-
+  %%memberchk(expr(K,_,_), Gps),
+  %%check_if_k_in_group_by(Gps, Ks).
 
 
 
@@ -1648,13 +1664,22 @@ check_if_k_in_group_by(Gps, [K | Ks]):-
 %%    select a from t group by a 
 %%    create table s(a int, b int, primary key (a,b))
 %%    select a,b from s group by a,b
+%%    create table t(a int candidate key, b int)
+%%    select a from t group by a 
+%%    create table s(a int, b int, candidate key (a,b))
+%%    select a,b from s group by a,b
+%%    create or replace table t(a int primary key, b string determined by a);
+%%    select a,b from t group by a,b
 
-%%create table t(a int primary key, b string determined by a);
-%% my_functional_dependency('$des', t, [a], [b]).
+
+%%!!!!!!!!!!!!!!!!!!!!!!Comprobar las candidate key tambien!!!!!!!!!!!!!!!!! Claves candidatas hechas, pero siempre tiene que haber una clave primaria tmb, si no, tendríamos que volver a mosificar las condiciones del predicado extract_pks_and_df_from_gby
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
+  Group \== [],
   extract_pks_and_df_from_gby(Rls, Group, [], K),       %%sacamos las pks y df
-  check_if_k_in_group_by(Group, K),                     %%comprobamos que los conjuntos de GROUP BY y el de pk-df son iguales
-  check_if_group_by_in_k(K, Group),
+  extract_attr_from_group_by(Group, Gby),
+  sort(K, Ksort),
+  sort(Gby, Gbysort),
+  equal_attr(Ksort, Gbysort),         %%tengo que crearme una funcion para comparar porque el == me da siempre falso por el tercer parametro de los atributos
   !,
   sql_semantic_error_warning(['GROUP BY with singleton groups']).
 
@@ -1663,16 +1688,21 @@ check_group_by_with_singleton_groups(_SQLst).
 
 extract_pks_and_df_from_gby([], _, K, K).
 
-extract_pks_and_df_from_gby([(Rname, _) | Rels], Group, Kini, KFinal):-
-  my_primary_key('$des', Rname, Atts), % Obtener los atributos que forman la clave primaria.
-  complete_attr(Atts, Attrs),
-  check_if_is_pk(Attrs, Group, [], Pk), %Comprobamos las pk
+extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-         %%Meto el parametro Rel para añadir a los atributos la relacion de la que proceden y que coincida al hacer el sort con los del GBy
+  (my_primary_key('$des', Rname, Atts) % Obtener los atributos que forman la clave primaria.
+  -> complete_attr(Rel, Atts, Attrs)
+  ; Attrs = []),
+  (my_candidate_key('$des', Rname, Atts2) %Obtener claves candidates tmb.
+  -> (complete_attr(Rel, Atts2, Attrs2),
+  merge_lists(Attrs, Attrs2, Attrs3))
+  ; Attrs3 = Attrs),
+  check_if_is_pk(Rel,Attrs3, Group, [], Pk), %Comprobamos las pk
   merge_lists(Pk, Kini, Kmid1),
   (my_functional_dependency('$des', Rname, PrimK, Dp) 
-  -> (complete_attr(PrimK,Pks),
+  -> (complete_attr(Rel,PrimK,Pks),
   (member_chck_attr(Pk, Pks)
-  ->  (complete_attr(Dp, Dps),
-  check_if_is_df(Dps, Group, [], Dpss),
+  ->  (complete_attr(Rel,Dp, Dps),
+  check_if_is_df(Rel,Dps, Group, [], Dpss),
   merge_lists(Kmid1, Dpss, Kmid2))
   ; true))
   ; Kmid2 = Kmid1),  %%extraer dependencias funcionales ligados a la PK
@@ -1680,30 +1710,36 @@ extract_pks_and_df_from_gby([(Rname, _) | Rels], Group, Kini, KFinal):-
   extract_pks_and_df_from_gby(Rels, Group, Kmid2, KFinal).
 
 %%-----------Extraer si algun attr del Group by coincide con una PK dada--------------------------
-check_if_is_pk(_, [], Pks, Pks).
+check_if_is_pk(_,_, [], Pks, Pks).
 
-check_if_is_pk(Atts, [expr(attr(_,Attr,_),_,_) | Gps], Pks, PksFinal):-
-  (memberchk(attr(_,Attr,_), Atts)
-    -> Pkmid = [attr(_,Attr,_)| Pks]
+check_if_is_pk(Rname,Atts, [expr(attr(Rname,Attr,_),_,_) | Gps], Pks, PksFinal):-
+  (memberchk(attr(Rname,Attr,_), Atts)
+    -> Pkmid = [attr(Rname,Attr,_)| Pks]
     ; Pkmid = Pks),
-  check_if_is_pk(Atts, Gps, Pkmid, PksFinal).
+  check_if_is_pk(Rname,Atts, Gps, Pkmid, PksFinal).
 
 %%-----------Extraer si algun attr del Group by coincide con una DF dada--------------------------
-check_if_is_df(_, [], Dps, Dps).
+check_if_is_df(_,_, [], Dps, Dps).
 
-check_if_is_df(Dp, [expr(attr(_,Attr,_),_,_) | Gps], Dpini, DpFinal):-
-  (memberchk(attr(_,Attr,_), Dp)
-  -> Dpmid = [attr(_,Attr,_)| Dpini]
+check_if_is_df(Rname,Dp, [expr(attr(Rname,Attr,_),_,_) | Gps], Dpini, DpFinal):-
+  (memberchk(attr(Rname,Attr,_), Dp)
+  -> Dpmid = [attr(Rname,Attr,_)| Dpini]
   ; Dpmid = Dpini),
-  check_if_is_df(Dp, Gps, Dpmid, DpFinal).
+  check_if_is_df(Rname,Dp, Gps, Dpmid, DpFinal).
+
+check_if_is_df(Rname,Dp, [Gp | Gps], Dpini, DpFinal):-
+  (memberchk(Gp, Dp)
+  -> Dpmid = [Gp| Dpini]
+  ; Dpmid = Dpini),
+  check_if_is_df(Rname,Dp, Gps, Dpmid, DpFinal).
 
 %% completar atributos
-complete_attr([],[]).
+complete_attr(_,[],[]).
 
-complete_attr([At | Ats], [attr(_,At,_)| Attrs]):-
-  complete_attr(Ats,Attrs).
+complete_attr(Rname, [At | Ats], [attr(Rname,At,_)| Attrs]):-
+  complete_attr(Rname,Ats,Attrs).
 
-
+%% comprobar si los atributos estan en el conjunto K
 member_chck_attr([], _).
 member_chck_attr([attr(_,At,_)|Attr], K):-
   memberchk(attr(_,At,_), K),
@@ -1713,19 +1749,19 @@ member_chck_attr([attr(_,At,_)|Attr], K):-
 %% ERROR 20
 %% GROUP BY with only a single group
 %% Examples: 
-%%     create table t(a int, b int)
+%%     create or replace table t(a int, b int)
 %%     select a from t where a = all(select b from t) group by a
 %%     select a from t where a = (select b from t) group by a
 %%     select a from t where a = 3 group by a
 
-
+%% FALTA COMPROBAR ESTO!!!!!!!!!!!!!
 %%!!!!!!!!!!!!!!Aqui habría que comprobar que si los atributos del group by estan en el select, entonces no es error, a pesar de que solo sea un grupo y se imprima una columna constante???!!!!!!!!!!
 %%!!!!!!!!!!!!!!! si son las mismas coumnas de select las del group by salta error de DISTINCT!!!!!!!!!!!!!!!!!!!!!!!!
 check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
   extract_attributes_from_equalities_in_cnf(Cond, Res),       %%extraemos los atributos que estan igualados a una constante en el where en forma normal conjuntiva (AND)
   check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lista de comparaciones del tipo a = cte()
   !,
-  sql_semantic_error_warning(['GROUP BY with only a single group']).
+  sql_semantic_error_warning(['GROUP BY with only a single group.']).
 check_group_by_only_with_one_group(_SQLst).
 
 
@@ -1744,21 +1780,32 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    create table j(a int, b int) 
 %%    select a from j where a = b group by a,b
 %%    Bien -> select a from j where a = b group by a,b having b = 1
+%%      Con DF
+%%    create table t(a int primary key, b string determined by a)
+%%    select a from t  group by a,b 
+%%    Bien -> select a,b from t group by a,b 
 
 %%!!!!!!!!!!!!!!!!!!!!!!!!!Falta tener en cuenta las dependencias funcionales!!!!!!!!!!!!!!!!!!!!!
-%%!!!!!!!!!!!!!!!!!!!!!!!!!Falyta comprobar las igualdades de constantes tmb !!!!!!!!!!!!!!!!!!!!!
 %%create table t(a int primary key, b string determined by a);
 %% my_functional_dependency('$des', t, [a], [b]).
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
-  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
   extract_attr_from_group_by(Group, AttsGBY),     %%atributos presentes en el group by
-  check_func_deps(Rels, AttsGBY, [], Kfunc),
+  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
+
+  check_func_deps(Rels, AttsGBY, [], Kfunc), 
+  (member_chck_attr(Kfunc, K)                 %% si los atributos del gby que tienen df estan en el select o en having, no se hace nada
+  -> Kfunc = []
+  ; true),     
   check_attributes_from_grby(AttsGBY, Kfin, Dps),  %%guardamos los atributos del group by dependientes entre ellos en la lista Dps
-  validate_dps(Dps, K, Omit),                     %%comprobar cuales son los atributos de group by de podemos omitir
-  warning_message_21(Omit).                       %%imprimir mensaje
+  (Dps \== []
+    -> validate_dps(Dps, K, Omit)                  %%comprobar cuales son los atributos de group by de podemos omitir
+    ; Omit = []),                
+  merge_lists(Omit, Kfunc, Omits),                %%Unimos las listas de DF y las de igualdades en el where
+  sort(Omits, Omitsnueva),                        %%Eliminamos duplicados
+  warning_message_21(Omitsnueva).                       %%imprimir mensaje
 
 check_if_attr_grp_by_is_unnec(_SQLst).
 
@@ -1766,7 +1813,7 @@ check_if_attr_grp_by_is_unnec(_SQLst).
 %%----------------------Loop para añadir las dependencias del where------------
 loop_add(Cond, Kin, KoutFinal) :-
   add3(Cond, Kin, Kmid),      
-  ( Kin \= Kmid 
+  ( Kin \== Kmid 
     -> loop_add(Cond, Kmid, KoutFinal)
      ; KoutFinal = Kmid ).
 
@@ -1812,13 +1859,6 @@ add2(and(C1,C2), Kin, Kout):-
 add2(_, Kin, Kin).
 
 
-%%-------------------Extraer los atributos presentes en el group by------------
-
-extract_attr_from_group_by([], _Gbys).
-
-extract_attr_from_group_by([expr(attr(_,Attr,_),_,_) | Gps], [attr(_,Attr,_) | Gbys]):-
-  extract_attr_from_group_by(Gps, Gbys).
-
 
 
 %%------------------------Para ver que terminos del group by tienen dependencia directa--------------
@@ -1837,21 +1877,20 @@ check_attributes_from_grby([_Attr|Rest], Kfin, ValidRest) :-
 %%--------------------------Funcion para sacar los atributos que se pueden omitir en el group by------
 % Predicado principal que comprueba el tamaño de Dps y filtra los elementos no presentes en K.
 validate_dps(Dps, K, Aux) :-
-  % Se verifica que Dps tenga al menos dos elementos
+  % Verifica que Dps tenga al menos dos elementos
   Dps = [_,_|_],
-  % Se filtran los elementos de Dps que no aparecen en K
+  % Filtra los elementos que no están en K
   filter_not_in(Dps, K, [], Aux).
 
-% Caso base: si la lista está vacía, la lista auxiliar también lo está.
+% Caso base: la lista vacía devuelve la auxiliar acumulada
 filter_not_in([], _K, AuxT, AuxT).
 
-% Si el elemento H no está en K, se agrega a la lista auxiliar.
+% Caso recursivo: construye AuxT correctamente
 filter_not_in([H|T], K, AuxT, AuxT2) :-
   (\+ memberchk(H, K)
-  -> AuxMid = [H|AuxT]
-  ; true),
+    -> AuxMid = [H|AuxT]
+    ;  AuxMid = AuxT),
   filter_not_in(T, K, AuxMid, AuxT2).
-
 
 %%------------------------imprimir mensaje de error 21--------------
 warning_message_21([]).
@@ -1861,13 +1900,110 @@ warning_message_21([attr(_,Oname,_)|Omit]):-
   warning_message_21(Omit).
 
 
-
-
-%%create table t(a int primary key, b string determined by a);
-%% my_functional_dependency('$des', t, [a], [b]).
 %%----------------------Para comprobar si hay dependencias----------------
 check_func_deps([], _ , K, K).
 
+check_func_deps([(Rname,[Rel |_])| Rels], Gbpy, Kin, Kfunc):-
+  (my_functional_dependency('$des', Rname, PrimK, Dp) 
+  -> (complete_attr(Rel,PrimK,Pks),
+  (member_chck_attr(Pks, Gbpy)
+  ->  (complete_attr(Rel,Dp, Dps),
+  check_if_is_df(Rel,Dps, Gbpy, [], Dpss), 
+  merge_lists(Kin, Dpss, Kmid))
+  ; Kmid = Kin)); true),
+  check_func_deps(Rels, Gbpy, Kmid, Kfunc).
+
+
+
+%%----------------------------------------Hasta aqui errores del GROUP BY----------------------------------------------------------------------------
+
+
+%% ERROR 23:
+%% UNION can be replace by OR
+%% select distinct * from ((select * from t) union (select * from s));
+
+%%Hay que usar esta funcion: check_sql_tautological_condition(PSQLst) :-
+%%PSQLst=(select(Distinct,Top,Offset,PList,TList,From,where(SQLCondition),GroupBy,Having,OrderBy),Schema), % Check, for now, this kind of select statements
+%%  SQLCondition\==true,
+%% en vez de crear la consulta con una unica condicion en el where, despues de haber comprobado que el select y el froms on iguales, llamar a esta funcion con una and de ambos where
+
+check_if_union_by_or((select(_D,_T,_Of,_Cs,_TL,from([(union('distinct', SQLst1, SQLst2, _F))]),_W,_G,_H,_O),_AS)):-
+  %%PSQLst=(select(Distinct,Top,Offset,PList,TList,From,where(SQLCondition),GroupBy,Having,OrderBy),Schema). % Check, for now, this kind of select statements
+  SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
+  SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL1,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
+  Cs1 == Cs2,
+  Rels1 == Rels2,
+  check_sql_tautological_condition((select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(and(Cond1, Cond2)),_G1,_H1,_O1),_AS1)),
+  sql_semantic_error_warning(['UNION can be replaced by OR.']).
+
+
+check_if_union_by_or(_SQLst).
+
+
+%% ERROR 24:
+%% Unnecessary ORDER BY term.
+%% muy parecido a los del group by
+
+%%HAY QUE RESPETAR EL ORDEN???? como busco cuáles son los siguientes de la lista de ordby que cumplen esa condicion de DF?????
+
+check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(Order,_N)),_AS)):-
+  extract_attr_from_order_by(Order, Oby),
+  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
+
+
+
+
+check_if_ord_by_is_unnec(_SQLst).
+
+extract_attr_from_order_by([], _Obys).
+
+extract_attr_from_order_by([expr(attr(_,Attr,_),_,_) | Ops], [attr(_,Attr,_) | Obys]):-
+  extract_attr_from_order_by(Ops, Obys).
+
+check_func_deps([], _ , K, K).
+
+%%ESTO ESTA MAAAAAAL QUE HACEMOS CON KIN
 check_func_deps([(Rname,_)| Rels], Gbpy, Kin, Kfunc):-
   my_functional_dependency('$des', Rname, Gbpy, Kmid),
   check_func_deps(Rels, Gbpy, Kmid, Kfunc).
+
+
+/*
+%% ERROR 25:
+%% Inefficient HAVING
+%% Aquí hay que comprobar que, independientemente de que haya cláusula WHERE o no,
+%% si hay cláusula HAVING con condiciones como =, >, < y
+%% no hay funciones de agregación de por medio (avg, min, max, etc.),
+%% entonces salta el error.
+%% Aggr = sum_distinct(V) ; avg_distinct(V) ; times_distinct(V) ; count_distinct(V)
+
+check_if_inefficient_having((
+    select(_D, _T, _Of, Cs, _TL, _F, where(Cond), _G, having(Having), _O), _AS)) :- 
+    Having \== true,                        %% Si hay cláusula HAVING
+    extract_attributes(Cs, Kselect),       %% Guardamos los atributos del SELECT en Kselect
+    add2(Having, [], Khave),               %% Guardamos en Khave los atributos del HAVING
+    merge_lists(Kselect, Khave, K),        %% Combinamos SELECT + HAVING en K
+    valid_list(K),                         %% Validamos que no haya funciones de agregación
+    sql_semantic_error_warning(['Inefficient HAVING.']).  %% Lanzamos el warning
+
+check_if_inefficient_having(_SQLst).
+%% En cualquier otro caso, no hacemos nada.
+
+% valid_list/1: verifica que todos los elementos de una lista sean válidos (sin agregación)
+valid_list([]).  % Caso base: lista vacía es válida
+valid_list([H|T]) :-
+    valid_element(H),
+    valid_list(T).
+
+% valid_element/1: verdadero si X no es una función de agregación prohibida
+valid_element(X) :-
+    X \== sum_distinct(_),
+    X \== avg_distinct(_),
+    X \== times_distinct(_),
+    X \== count_distinct(_).
+*/
+
+
+%% ERROR 26:
+%% Inefficient UNION
+%% si no proceden de la misma tabla ambas consultas, habria que usar el algoritmo del distinct en ambas para ver si es necesario ponerlo o no, es decir, si tienen duplicados. Si proceden de la misma tabla, habria que comprobar que 
