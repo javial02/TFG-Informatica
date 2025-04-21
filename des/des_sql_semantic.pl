@@ -1623,6 +1623,7 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having
 
 check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(Group),_H,_O),_AS)):-
   Group \== [],
+  %%valid_list(Having),
   extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
   extract_attr_from_group_by(Group, Gby),
   sort(X, Xsort),
@@ -1647,7 +1648,17 @@ equal_attr([attr(A1,B1,_)|T1], [attr(A2,B2,_)|T2]) :-
     B1 == B2,
     equal_attr(T1, T2).
 
+valid_list([]).  % Caso base: lista vacía es válida
+valid_list([H|T]) :-
+    valid_element(H),
+    valid_list(T).
 
+% valid_element/1: verdadero si X no es una función de agregación prohibida
+valid_element(X) :-
+    X \== sum_distinct(_),
+    X \== avg_distinct(_),
+    X \== times_distinct(_),
+    X \== count_distinct(_).
 %% --------------Caso contrario para ver si K en Group By-----------------
 %%check_if_k_in_group_by(_, []).
 
