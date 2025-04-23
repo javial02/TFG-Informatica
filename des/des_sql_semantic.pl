@@ -140,7 +140,7 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_unnecessary_join(Bss,NVss),                   % Error  6
                                                           % Error  7 (processed in sql_to_dl)
   check_sql_tautological_condition(SQLst),                % Error  8 (also processed in post_table_constraint)
-  check_sql_null_tautological_inconsistent_condition(Rs), % Error  8 for IS [NOT] NULL
+  check_sql_null_tautological_inconsistent_condition_improved(SQLst, Rs), % Error  8 for IS [NOT] NULL
   check_sql_null_comparison(SQLst),                       % Error  9
   check_sql_general_comparison(SQLst),                    % Error 11
   check_sql_like(SQLst),                                  % Error 12
@@ -956,33 +956,58 @@ check_sql_tautological_condition(Condition,Rs,ARs,ExpandCtrs) :-
   !.
   
 %% Error 8: Inconsistent / Implied or tautological condition over IS [NOT] NULL comparison.
-%% 
+%% Examples : create table department (deptno char(3) primary key, deptname varchar(36) not null); 
+%%            create table employee (empno char(6) primary key, firstname varchar(12), lastname varchar(15) not null, workdept char(3), foreign key (workdept) references department(deptno));
+%%            select deptno, deptname from department left join employee on workdept = deptno where lastname is null order by deptno;
+%%            select deptno, deptname from department right join employee on workdept = deptno where deptname is null order by deptno;
 % check_sql_null_tautological_inconsistent_condition(+Rs). 
 % Check whether is_null / is_not_null is applied to a not-nullable column
-check_sql_null_tautological_inconsistent_condition([]).
-check_sql_null_tautological_inconsistent_condition([(_H :- B)|Rs]) :-
+
+check_sql_null_tautological_inconsistent_condition_improved((select(_AD,_T,_Of,_Cs,_TL,from(Rels),_W,_G,_H,_O),_AS), Rs):-
+  extract_not_nulleable_tables(Rels, [], Tnames),
+  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
+check_sql_null_tautological_inconsistent_condition_improved(_SQLst, []).
+
+extract_not_nulleable_tables([], K, K).
+extract_not_nulleable_tables([(left_join(_, (Tname, _), _),_) | Rels], Kin, Kout):-
+  Kmid = [Tname|Kin],
+  extract_not_nulleable_tables(Rels, Kmid, Kout).
+extract_not_nulleable_tables([(right_join((Tname, _),_, _),_) | Rels], Kin, Kout):-
+  Kmid = [Tname|Kin],
+  extract_not_nulleable_tables(Rels, Kmid, Kout).
+extract_not_nulleable_tables([(join((Tname1, _), (Tname2, _), _),_) | Rels], Kin, Kout):-
+  Kmid = [Tname1, Tname2 |Kin],
+  extract_not_nulleable_tables(Rels, Kmid, Kout).
+extract_not_nulleable_tables([_| Rels], Kin, Kout):-
+  extract_not_nulleable_tables(Rels, Kin, Kout).
+
+
+
+check_sql_null_tautological_inconsistent_condition([], _).
+check_sql_null_tautological_inconsistent_condition([(_H :- B)|Rs], Tnames) :-     %%añadimos el parametro Tnames que será una lista de tablas dosnde en funcion que el join que sea guardaremos las tablas que no aplican a este predicado
   !,
   my_list_to_tuple(Bs,B),
   all_user_predicate_goals(Bs,Gs),
-  not_null_source_vars_list(Gs,SGs,NNVs),
+  not_null_source_vars_list(Tnames,Gs,SGs,NNVs),
   check_sql_null_list(Bs,SGs,NNVs),
-  check_sql_null_tautological_inconsistent_condition(Rs).
-check_sql_null_tautological_inconsistent_condition([_Fact|Rs]) :-
-  check_sql_null_tautological_inconsistent_condition(Rs).
+  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
+check_sql_null_tautological_inconsistent_condition([_Fact|Rs], Tnames) :-
+  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
   
-not_null_source_vars_list(Gs,SGs,NNVs) :-
-  not_null_source_vars_list(Gs,[],SGs,[],NNVs).
+not_null_source_vars_list(Tnames,Gs,SGs,NNVs) :-
+  not_null_source_vars_list(Tnames,Gs,[],SGs,[],NNVs).
 
-not_null_source_vars_list([],SGs,SGs,NNVs,NNVs).
-not_null_source_vars_list([G|Gs],SGsi,SGso,NNVsi,NNVso) :-
-  not_null_source_vars(G,SGs,NNVs),
+not_null_source_vars_list(Tnames,[],SGs,SGs,NNVs,NNVs).
+not_null_source_vars_list(Tnames,[G|Gs],SGsi,SGso,NNVsi,NNVso) :-
+  not_null_source_vars(Tnames,G,SGs,NNVs),
   append(SGsi,SGs,SGsi1),
   append(NNVsi,NNVs,NNVsi1),
-  not_null_source_vars_list(Gs,SGsi1,SGso,NNVsi1,NNVso).
+  not_null_source_vars_list(Tnames,Gs,SGsi1,SGso,NNVsi1,NNVso).
 
-not_null_source_vars(G,SGs,NNVs) :-
+not_null_source_vars(Tnames, G,SGs,NNVs) :-
   G=..[TableName|Vs],
-  current_db(Conn),
+  (\+memberchk(TableName, Tnames) 
+  ->(current_db(Conn),
   (my_not_nullables(Conn,TableName,NNColumnNames) -> true ; NNColumnNames=[]),
   (my_primary_key(Conn,TableName,PKColumnNames) -> true ; PKColumnNames=[]),
   findall(CKColumnName,(my_candidate_key(Conn,TableName,CKColumnNames),member(CKColumnName,CKColumnNames)),CKsColumnNames),
@@ -996,7 +1021,10 @@ not_null_source_vars(G,SGs,NNVs) :-
     SGs=[G],
     get_att_positions(TableName,ColumnNames,Positions),
     my_nth1_member_list(NNVs,Positions,Vs)
-  ).
+  ))
+  ;
+  SGs=[],
+  NNVs=[]).
   
 check_sql_null_list([],_SGs,_Vs).
 check_sql_null_list([is_null(V)|Gs],SGs,Vs) :-
@@ -1609,8 +1637,8 @@ check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond)
 
 check_group_by_in_exists_subqry(_SQLst).
 
-check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having(H),_O),_AS)):-
-  Group \== [],         %si el apartado de group by no es vacío
+check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),_O),_AS)):-
+  G \== [],         %si el apartado de group by no es vacío
   H == true.          %si el apartado de having está vacío
 
 
@@ -1621,11 +1649,11 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(Group),having
 %%    create table s(a int, b int)
 %%    select a,b from s group by a,b   
 
-check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(Group),_H,_O),_AS)):-
-  Group \== [],
+check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(G),_H,_O),_AS)):-
+  G \== [],
   %%valid_list(Having),
   extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
-  extract_attr_from_group_by(Group, Gby),
+  extract_attr_from_group_by(G, Gby),
   sort(X, Xsort),
   sort(Gby, Gbysort),
   equal_attr(Xsort, Gbysort),         %%tengo que crearme una funcion para comparar porque el == me da siempre falso por el tercer parametro de los atributos
@@ -1638,8 +1666,8 @@ check_if_distinct_intead_of_groub_by(_SQLst).
 %%-------------------Extraer los atributos del Group By--------------------
 extract_attr_from_group_by([], []).
 
-extract_attr_from_group_by([expr(attr(Rel,Attr,_),_,_) | Gps], [attr(Rel,Attr,_) | Gbys]):-
-  extract_attr_from_group_by(Gps, Gbys).
+extract_attr_from_group_by([expr(attr(Rel,Attr,_),_,_) | Gs], [attr(Rel,Attr,_) | Gbys]):-
+  extract_attr_from_group_by(Gs, Gbys).
 
 %%------------------Comprobar que las listas de atributos son iguales (sin tener en cuenta eel tercer parametro de attr)-------------
 equal_attr([], []).
