@@ -964,24 +964,23 @@ check_sql_tautological_condition(Condition,Rs,ARs,ExpandCtrs) :-
 % Check whether is_null / is_not_null is applied to a not-nullable column
 
 check_sql_null_tautological_inconsistent_condition_improved((select(_AD,_T,_Of,_Cs,_TL,from(Rels),_W,_G,_H,_O),_AS), Rs):-
-  extract_not_nulleable_tables(Rels, [], Tnames),
+  extract_not_nullable_tables(Rels, [], Tnames),
   check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
 check_sql_null_tautological_inconsistent_condition_improved(_SQLst, []).
 
-extract_not_nulleable_tables([], K, K).
-extract_not_nulleable_tables([(left_join(_, (Tname, _), _),_) | Rels], Kin, Kout):-
+%Extract names of not nullable tables to cover fake positives
+extract_not_nullable_tables([], K, K).
+extract_not_nullable_tables([(left_join(_, (Tname, _), _),_) | Rels], Kin, Kout):-
   Kmid = [Tname|Kin],
-  extract_not_nulleable_tables(Rels, Kmid, Kout).
-extract_not_nulleable_tables([(right_join((Tname, _),_, _),_) | Rels], Kin, Kout):-
+  extract_not_nullable_tables(Rels, Kmid, Kout).
+extract_not_nullable_tables([(right_join((Tname, _),_, _),_) | Rels], Kin, Kout):-
   Kmid = [Tname|Kin],
-  extract_not_nulleable_tables(Rels, Kmid, Kout).
-extract_not_nulleable_tables([(join((Tname1, _), (Tname2, _), _),_) | Rels], Kin, Kout):-
+  extract_not_nullable_tables(Rels, Kmid, Kout).
+extract_not_nullable_tables([(full_join((Tname1, _), (Tname2, _), _),_) | Rels], Kin, Kout):-
   Kmid = [Tname1, Tname2 |Kin],
-  extract_not_nulleable_tables(Rels, Kmid, Kout).
-extract_not_nulleable_tables([_| Rels], Kin, Kout):-
-  extract_not_nulleable_tables(Rels, Kin, Kout).
-
-
+  extract_not_nullable_tables(Rels, Kmid, Kout).
+extract_not_nullable_tables([_| Rels], Kin, Kout):-
+  extract_not_nullable_tables(Rels, Kin, Kout).
 
 check_sql_null_tautological_inconsistent_condition([], _).
 check_sql_null_tautological_inconsistent_condition([(_H :- B)|Rs], Tnames) :-     %%añadimos el parametro Tnames que será una lista de tablas dosnde en funcion que el join que sea guardaremos las tablas que no aplican a este predicado
@@ -997,7 +996,7 @@ check_sql_null_tautological_inconsistent_condition([_Fact|Rs], Tnames) :-
 not_null_source_vars_list(Tnames,Gs,SGs,NNVs) :-
   not_null_source_vars_list(Tnames,Gs,[],SGs,[],NNVs).
 
-not_null_source_vars_list(Tnames,[],SGs,SGs,NNVs,NNVs).
+not_null_source_vars_list(_,[],SGs,SGs,NNVs,NNVs).
 not_null_source_vars_list(Tnames,[G|Gs],SGsi,SGso,NNVsi,NNVso) :-
   not_null_source_vars(Tnames,G,SGs,NNVs),
   append(SGsi,SGs,SGsi1),
@@ -1466,36 +1465,34 @@ sql_semantic_error_warning(Message) :-
   write_warning_log(['[Sem] '|ContMessage]).
 
 
-%% ---------------AQUI EMPIEZO YO---------------------------------
+%% Javier Amado Lázaro starts from here
 
-check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rls),where(Cond),group_by(Group),_H,_O),_AS)) :-
+%% Error 2: Unnecesary DISTINCT
+%%    Examples:
+%%      
+check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS)) :-
   D == 'distinct',
   extract_attributes(Cs, X),
-  %%hacer un sort para eliminar duplicados. sort(X, Xnueva)
   sort(X, Xnueva),
   extract_attributes_from_equalities_in_cnf(Cond, Res),
-  %hacer merge de Res con Xnueva y comprobar si se ordenan o no paraeliminar duplicados
   merge_lists(Xnueva, Res, X2), 
-  %%Paso4: Hacer una cosa parecida a lo de las constantes, pero con attr, y comprobar con member_check, si el attr esta en el conjunto X
-  loop_add_check(Cond, Rls, X2, X3),
-  %%Paso5: Comprobar si las key de cada tabla estan en K
-  (Group == [] 
-    -> check_if_key_is_included(X3, Rls)
+  loop_add_check(Cond, Rels, X2, X3),
+  (G == [] 
+    -> check_if_key_is_included(X3, Rels)
     ;
-    check_if_group_by_in_k(X3, Group)),
+    check_if_group_by_in_k(X3, G)),
   !,
   sql_semantic_error_warning(['Using unnecesary DISTINCT.']).
-
 check_sql_unnec_distinct(_SQLst).
 
-%%----------Paso2. Función para extraer atributos y comprobar que no son constantes----------
+%% Extract attributes from SELECT clause
 extract_attributes([],[]).
-extract_attributes([expr(attr(A1, A2, A3), _, _)|Cs], [attr(A1, A2, A3)|As]):-
+extract_attributes([expr(attr(Rel, Name, Id), _, _)|Cs], [attr(Rel, Name, Id)|As]):-
   extract_attributes(Cs, As).  
   
-%%----------Paso3. Extraer los attr que se comparan con cte en where-------------------------
-get_attr_from_cte_equality(attr(A1, A2, A3)=cte(_, _), attr(A1, A2, A3)).
-get_attr_from_cte_equality(cte(_, _) = attr(A1, A2, A3), attr(A1, A2, A3)).
+%% Extract attributes from constant equalities
+get_attr_from_cte_equality(attr(Rel, Name, Id)=cte(_, _), attr(Rel, Name, Id)).
+get_attr_from_cte_equality(cte(_, _) = attr(Rel, Name, Id), attr(Rel, Name, Id)).
 
 extract_attributes_from_equalities_in_cnf(Cond, [Attr]):-
   get_attr_from_cte_equality(Cond, Attr),
@@ -1506,12 +1503,12 @@ extract_attributes_from_equalities_in_cnf(and(C1,C2), [Attr | Resto]):-
   !,
   extract_attributes_from_equalities_in_cnf(C2, Resto).
 
-%%Para el error 20
+%%Error 20
 extract_attributes_from_equalities_in_cnf(Cond, [Attr]):-
   get_attr_from_subq_equality(Cond, Attr),
   !.
 
-%%Para el error 20
+%%Error 20
 extract_attributes_from_equalities_in_cnf(and(C1,C2), [Attr | Resto]):-
   get_attr_from_subq_equality(C1, Attr),
   !,
@@ -1522,35 +1519,32 @@ extract_attributes_from_equalities_in_cnf(and(_,C2), Resto):-
 
 extract_attributes_from_equalities_in_cnf(_Cond, []).
 
-%%----------Unir las listas--------------------------------------
-merge_lists(X, Y, Z):-
-  append(X,Y, Aux),     %%Juntamos las dos listas
-  remove_attr_duplicates(Aux, [], Z).  %%eliminamos duplicados pasandolo a conjunto
 
-remove_attr_duplicates([], Acc, Acc). % Caso base: lista vacía
+merge_lists(X, Y, Z):-
+  append(X,Y, Aux),     
+  remove_attr_duplicates(Aux, [], Z).  
+
+remove_attr_duplicates([], Acc, Acc). 
 remove_attr_duplicates([attr(R, N, T)|Rest], Acc, Kout) :-
-    (member(attr(R, N, _), Acc) ->  % Si ya hay un attr con el mismo R y N...
-        remove_attr_duplicates(Rest, Acc, Kout)  % Lo ignoramos
+    (member(attr(R, N, _), Acc) ->  
+        remove_attr_duplicates(Rest, Acc, Kout)  
     ;
-        remove_attr_duplicates(Rest, [attr(R, N, T)|Acc], Kout) % Lo agregamos
+        remove_attr_duplicates(Rest, [attr(R, N, T)|Acc], Kout) 
     ).
  
 
-%%----------Paso4. Bucle del algoritmo----------------------------------------------
-%%-----add(Cond, Kin, Kout) que añade los attr de la igualdad A = B a K----------
-add(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kout):-
-  (memberchk(attr(R1,N1,T1), Kin),
-  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
-  -> Kin1 = [attr(R2,N2,T2)|Kin]
+%% Add A=B attr to K
+add(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
+  (memberchk(attr(Rel1,Name1,Id1), Kin),
+  \+ memberchk(attr(Rel2,Name2,Id2), Kin) %%\+ es not.
+  -> Kin1 = [attr(Rel2,Name2,Id2)|Kin]
   ;  Kin1 = Kin ),
   (Kin == Kin1 ,
-  memberchk(attr(R2,N2,T2), Kin1),
-  \+ memberchk(attr(R1,N1,T1), Kin1) %%\+ es not.
-  -> Kout = [attr(R1,N1,T1)|Kin1]
+  memberchk(attr(Rel2,Name2,Id2), Kin1),
+  \+ memberchk(attr(Rel1,Name1,Id1), Kin1) %%\+ es not.
+  -> Kout = [attr(Rel1,Name1,Id1)|Kin1]
   ;  Kout = Kin1).
          
-
-
 add(and(C1,C2), Kin, Kout):-
   add(C1, Kin, Kin1),
   add(C2, Kin1, Kout).
@@ -1558,21 +1552,15 @@ add(and(C1,C2), Kin, Kout):-
 add(_, Kin, Kin).
 
 
-%%------------Meter en K todos los attr de las relaciones que tengan una primary key en K------------
 check_if_pk([],_,_).
-
-check_if_pk([(Rname,_)|Rels], Kin, Kout):-
-  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
-   ->check_attr_in_k(Atts, Kin),   %%guardamos todos los atributos de la tabla Rel en la lista As
-   findall(attr(Rname,A,_), my_attribute('$des',_,Rname,A,_), As),
-   %%convert_to_attr(As, Attrs),
-   %%Unimos la nueva lista de atributos a nuestar K anterior y eliminamos duplicados
+check_if_pk([(Rel,_)|Rels], Kin, Kout):-
+  (my_primary_key('$des',Rel, Atts)
+   ->check_attr_in_k(Atts, Kin),  
+   findall(attr(Rel,A,_), my_attribute('$des',_,Rel,A,_), As),
    merge_lists(Kin, As, Kmid),
    Kout = Kmid
    ; Kout = Kin), 
    check_if_pk(Rels, Kmid, Kout).
-
-
 
 
 loop_add_check(Cond, Rels,Kin, KoutFinal) :-
@@ -1584,19 +1572,17 @@ loop_add_check(Cond, Rels,Kin, KoutFinal) :-
   -> KoutFinal = Kout
   ;
   loop_add_check(Cond, Rels, Kout, KoutFinal)).
-
-loop_add_check(_, _, K, K).  % Caso base: Si Kin == Kout, detener el bucle.
-
+loop_add_check(_, _, K, K).  
 
 
-
-%%--------------Paso5. Iremos tabla por tabla para comprobar si las key estan en K----------------
-check_if_key_is_included(_, []):- !.     %%caso base
-
-check_if_key_is_included(K, [(Rname,_) | Rels]):-
-  (my_primary_key('$des',Rname, Atts) %%sacamos la primary key de esa rel
+check_if_key_is_included(_, []):- !.     
+check_if_key_is_included(K, [(Rel,_) | Rels]):-
+  (my_primary_key('$des',Rel, Atts) 
    ->check_attr_in_k(Atts, K)
-   ; true),             %%ahora hay que comprobar si esa key esta en nuestro conjunto K
+   ; true),
+  (my_candidate_key('$des',Rel, Atts2) 
+    ->check_attr_in_k(Atts2, K)
+    ; true),               
   check_if_key_is_included(K, Rels).
 
 
@@ -1605,27 +1591,23 @@ check_attr_in_k([Att | Atts], K):-
   ->true
   ;
   check_attr_in_k(Atts, K)).
-
 check_attr_in_k([],_):- fail.
 
 
 convert_to_attr([As|Ass],[attr(_,As,_)|Res]):-
   convert_to_attr(Ass, Res).
-
 convert_to_attr([],_):- !.
 
-%% --------------Caso para el Group By-----------------
-check_if_group_by_in_k(_, []).
 
+check_if_group_by_in_k(_, []).
 check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
   memberchk(attr(_,Attr,_), K),
   check_if_group_by_in_k(K, Gps).
 
 
 
-%% ERROR 18
-%% Unnecesary Group by in Exists subquery
-%% Examples:
+%% Error 18: Unnecesary GROUP BY in EXISTS subquery
+%%   Examples:
 %%    create table t(a int) 
 %%    create table s(a int, b int)
 %%    select a from t where exists (select a from s group by a)
@@ -1638,67 +1620,11 @@ check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond)
 check_group_by_in_exists_subqry(_SQLst).
 
 check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),_O),_AS)):-
-  G \== [],         %si el apartado de group by no es vacío
-  H == true.          %si el apartado de having está vacío
+  G \== [],         
+  H == true.      
 
 
-
-%% ERROR 22
-%% GROUP BY can be replaced by DISTINCT
-%% Examples:
-%%    create table s(a int, b int)
-%%    select a,b from s group by a,b   
-
-check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(G),_H,_O),_AS)):-
-  G \== [],
-  %%valid_list(Having),
-  extract_attributes(Cs, X),                %Extraemos los atributos de las columnas del select
-  extract_attr_from_group_by(G, Gby),
-  sort(X, Xsort),
-  sort(Gby, Gbysort),
-  equal_attr(Xsort, Gbysort),         %%tengo que crearme una funcion para comparar porque el == me da siempre falso por el tercer parametro de los atributos
-  !,
-  sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT.']).
-
-check_if_distinct_intead_of_groub_by(_SQLst).
-
-
-%%-------------------Extraer los atributos del Group By--------------------
-extract_attr_from_group_by([], []).
-
-extract_attr_from_group_by([expr(attr(Rel,Attr,_),_,_) | Gs], [attr(Rel,Attr,_) | Gbys]):-
-  extract_attr_from_group_by(Gs, Gbys).
-
-%%------------------Comprobar que las listas de atributos son iguales (sin tener en cuenta eel tercer parametro de attr)-------------
-equal_attr([], []).
-equal_attr([attr(A1,B1,_)|T1], [attr(A2,B2,_)|T2]) :-
-    A1 == A2,
-    B1 == B2,
-    equal_attr(T1, T2).
-
-valid_list([]).  % Caso base: lista vacía es válida
-valid_list([H|T]) :-
-    valid_element(H),
-    valid_list(T).
-
-% valid_element/1: verdadero si X no es una función de agregación prohibida
-valid_element(X) :-
-    X \== sum_distinct(_),
-    X \== avg_distinct(_),
-    X \== times_distinct(_),
-    X \== count_distinct(_).
-%% --------------Caso contrario para ver si K en Group By-----------------
-%%check_if_k_in_group_by(_, []).
-
-%%check_if_k_in_group_by(Gps, [K | Ks]):-
-  %%memberchk(expr(K,_,_), Gps),
-  %%check_if_k_in_group_by(Gps, Ks).
-
-
-
-
-%% ERROR 19
-%% GROUP BY with singleton groups
+%% Error 19: GROUP BY with singleton groups
 %% Examples: 
 %%    create table t(a int primary key, b int)
 %%    select a from t group by a 
@@ -1711,32 +1637,28 @@ valid_element(X) :-
 %%    create or replace table t(a int primary key, b string determined by a);
 %%    select a,b from t group by a,b
 
-
-%%!!!!!!!!!!!!!!!!!!!!!!Comprobar las candidate key tambien!!!!!!!!!!!!!!!!! Claves candidatas hechas, pero siempre tiene que haber una clave primaria tmb, si no, tendríamos que volver a mosificar las condiciones del predicado extract_pks_and_df_from_gby
-check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rls),_W,group_by(Group),_H,_O),_AS)):-
-  Group \== [],
-  extract_pks_and_df_from_gby(Rls, Group, [], K),       %%sacamos las pks y df
-  extract_attr_from_group_by(Group, Gby),
+check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),_W,group_by(G),_H,_O),_AS)):-
+  G \== [],
+  extract_pks_and_df_from_gby(Rels, G, [], K),       
+  extract_attr_from_group_order_by(G, GAttrs),
   sort(K, Ksort),
-  sort(Gby, Gbysort),
-  equal_attr(Ksort, Gbysort),         %%tengo que crearme una funcion para comparar porque el == me da siempre falso por el tercer parametro de los atributos
+  sort(GAttrs, GAttrsSort),
+  equal_attr(Ksort, GAttrsSort),         
   !,
   sql_semantic_error_warning(['GROUP BY with singleton groups']).
-
 check_group_by_with_singleton_groups(_SQLst).
 
-
+% To extract PKs, CKs and FDs
 extract_pks_and_df_from_gby([], _, K, K).
-
-extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-         %%Meto el parametro Rel para añadir a los atributos la relacion de la que proceden y que coincida al hacer el sort con los del GBy
-  (my_primary_key('$des', Rname, Atts) % Obtener los atributos que forman la clave primaria.
+extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-    
+  (my_primary_key('$des', Rname, Atts)
   -> complete_attr(Rel, Atts, Attrs)
   ; Attrs = []),
-  (my_candidate_key('$des', Rname, Atts2) %Obtener claves candidates tmb.
+  (my_candidate_key('$des', Rname, Atts2)
   -> (complete_attr(Rel, Atts2, Attrs2),
   merge_lists(Attrs, Attrs2, Attrs3))
   ; Attrs3 = Attrs),
-  check_if_is_pk(Rel,Attrs3, Group, [], Pk), %Comprobamos las pk
+  check_if_is_pk(Rel,Attrs3, Group, [], Pk),
   merge_lists(Pk, Kini, Kmid1),
   (my_functional_dependency('$des', Rname, PrimK, Dp) 
   -> (complete_attr(Rel,PrimK,Pks),
@@ -1745,92 +1667,83 @@ extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):- 
   check_if_is_df(Rel,Dps, Group, [], Dpss),
   merge_lists(Kmid1, Dpss, Kmid2))
   ; true))
-  ; Kmid2 = Kmid1),  %%extraer dependencias funcionales ligados a la PK
-  
+  ; Kmid2 = Kmid1),  
   extract_pks_and_df_from_gby(Rels, Group, Kmid2, KFinal).
 
-%%-----------Extraer si algun attr del Group by coincide con una PK dada--------------------------
+%% Check if Gby attr equals to PK
 check_if_is_pk(_,_, [], Pks, Pks).
-
-check_if_is_pk(Rname,Atts, [expr(attr(Rname,Attr,_),_,_) | Gps], Pks, PksFinal):-
-  (memberchk(attr(Rname,Attr,_), Atts)
-    -> Pkmid = [attr(Rname,Attr,_)| Pks]
+check_if_is_pk(Rel,Atts, [expr(attr(Rel,Name,_),_,_) | Gps], Pks, PksFinal):-
+  (memberchk(attr(Rel,Name,_), Atts)
+    -> Pkmid = [attr(Rel,Name,_)| Pks]
     ; Pkmid = Pks),
-  check_if_is_pk(Rname,Atts, Gps, Pkmid, PksFinal).
+  check_if_is_pk(Rel,Atts, Gps, Pkmid, PksFinal).
 
-%%-----------Extraer si algun attr del Group by coincide con una DF dada--------------------------
+%% Check if Gby attr equals to FD
 check_if_is_df(_,_, [], Dps, Dps).
-
-check_if_is_df(Rname,Dp, [expr(attr(Rname,Attr,_),_,_) | Gps], Dpini, DpFinal):-
-  (memberchk(attr(Rname,Attr,_), Dp)
-  -> Dpmid = [attr(Rname,Attr,_)| Dpini]
+check_if_is_df(Rel,Dp, [expr(attr(Rel,Name,_),_,_) | Gps], Dpini, DpFinal):-
+  (memberchk(attr(Rel,Name,_), Dp)
+  -> Dpmid = [attr(Rel,Name,_)| Dpini]
   ; Dpmid = Dpini),
-  check_if_is_df(Rname,Dp, Gps, Dpmid, DpFinal).
-
-check_if_is_df(Rname,Dp, [Gp | Gps], Dpini, DpFinal):-
+  check_if_is_df(Rel,Dp, Gps, Dpmid, DpFinal).
+check_if_is_df(Rel,Dp, [Gp | Gps], Dpini, DpFinal):-
   (memberchk(Gp, Dp)
   -> Dpmid = [Gp| Dpini]
   ; Dpmid = Dpini),
-  check_if_is_df(Rname,Dp, Gps, Dpmid, DpFinal).
+  check_if_is_df(Rel,Dp, Gps, Dpmid, DpFinal).
 
-%% completar atributos
+%% To complete attributes
 complete_attr(_,[],[]).
+complete_attr(Rel, [At | Ats], [attr(Rel,At,_)| Attrs]):-
+  complete_attr(Rel,Ats,Attrs).
 
-complete_attr(Rname, [At | Ats], [attr(Rname,At,_)| Attrs]):-
-  complete_attr(Rname,Ats,Attrs).
-
-%% comprobar si los atributos estan en el conjunto K
+%% To check if attr is in K
 member_chck_attr([], _).
 member_chck_attr([attr(_,At,_)|Attr], K):-
   memberchk(attr(_,At,_), K),
   member_chck_attr(Attr, K).
 
 
-%% ERROR 20
-%% GROUP BY with only a single group
+%% Error 20: GROUP BY with only a single group
 %% Examples: 
 %%     create or replace table t(a int, b int)
 %%     select a from t where a = all(select b from t) group by a
 %%     select a from t where a = (select b from t) group by a
 %%     select a from t where a = 3 group by a
 
-%% FALTA COMPROBAR ESTO!!!!!!!!!!!!!
-%%!!!!!!!!!!!!!!Aqui habría que comprobar que si los atributos del group by estan en el select, entonces no es error, a pesar de que solo sea un grupo y se imprima una columna constante???!!!!!!!!!!
-%%!!!!!!!!!!!!!!! si son las mismas coumnas de select las del group by salta error de DISTINCT!!!!!!!!!!!!!!!!!!!!!!!!
-check_group_by_only_with_one_group((select(_D,_T,_Of,_Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
+check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
+  extract_attributes(Cs, CsAttrs),
+  CsAttrs \== [],
   Group \== [],
-  extract_attributes_from_equalities_in_cnf(Cond, Res),       %%extraemos los atributos que estan igualados a una constante en el where en forma normal conjuntiva (AND)
-  check_if_group_by_in_k(Res, Group),                         %%comprobamos que todos los atributos de group by estan en la lista de comparaciones del tipo a = cte()
+  extract_attributes_from_equalities_in_cnf(Cond, Res),       
+  check_if_group_by_in_k(Res, Group),                         
   !,
   sql_semantic_error_warning(['GROUP BY with only a single group.']).
 check_group_by_only_with_one_group(_SQLst).
 
-
-%% para hacer la comparacion de = con la subconsulta
-get_attr_from_subq_equality(attr(A1, A2, A3)=(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(A1, A2, A3)).
-get_attr_from_subq_equality((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS) = attr(A1, A2, A3), attr(A1, A2, A3)).
-get_attr_from_subq_equality('=_all'(attr(A1, A2, A3),(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS)), attr(A1, A2, A3)).
-get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(A1, A2, A3)), attr(A1, A2, A3)).
-
+% new options for extract_attributes_from_equalities_in_cnf
+get_attr_from_subq_equality(attr(Rel, Name, Id)=(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(Rel, Name, Id)).
+get_attr_from_subq_equality((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS) = attr(Rel, Name, Id), attr(Rel, Name, Id)).
+get_attr_from_subq_equality('=_all'(attr(Rel, Name, Id),(select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS)), attr(Rel, Name, Id)).
+get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_AS), attr(Rel, Name, Id)), attr(Rel, Name, Id)).
 
 
 
-%% ERROR 21
-%% Unnecessary GROUP BY attribute
-%% Examples:
+
+%% Error 21: Unnecessary GROUP BY attribute
+%%   Examples:
 %%    create table j(a int, b int) 
 %%    select a from j where a = b group by a,b
-%%    Bien -> select a from j where a = b group by a,b having b = 1
-%%      Con DF
+%%    Positive example -> select a from j where a = b group by a,b having b = 1
+%%    With DF
 %%    create table t(a int primary key, b string determined by a)
 %%    select a from t  group by a,b 
-%%    Bien -> select a,b from t group by a,b 
+%%    Positive example -> select a,b from t group by a,b 
 
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
-  extract_attr_from_group_by(Group, AttsGBY),     %%atributos presentes en el group by
+  extract_attr_from_group_order_by(Group, AttsGBY),     %%atributos presentes en el group by
   loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
 
   check_func_deps(Rels, AttsGBY, [], Kfunc), 
@@ -1857,15 +1770,15 @@ loop_add(Cond, Kin, KoutFinal) :-
 
 loop_add(_, K, K).  % Caso base: Si Kin == Kout, detener el bucle.
 
-add3(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kout):-
-  (%memberchk(attr(R1,N1,T1), Kin),
-  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
-  -> Kin1 = [attr(R2,N2,T2)|Kin]
+add3(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
+  (%memberchk(attr(Rel1,Name1,Id1), Kin),
+  \+ memberchk(attr(Rel2,Name2,Id2), Kin) %%\+ es not.
+  -> Kin1 = [attr(Rel2,Name2,Id2)|Kin]
   ;  Kin1 = Kin ),
   (Kin == Kin1 ,
-  %memberchk(attr(R2,N2,T2), Kin1),
-  \+ memberchk(attr(R1,N1,T1), Kin1) %%\+ es not.
-  -> Kout = [attr(R1,N1,T1)|Kin1]
+  %memberchk(attr(Rel2,Name2,Id2), Kin1),
+  \+ memberchk(attr(Rel1,Name1,Id1), Kin1) %%\+ es not.
+  -> Kout = [attr(Rel1,Name1,Id1)|Kin1]
   ;  Kout = Kin1).
          
 
@@ -1941,8 +1854,8 @@ warning_message_21([attr(_,Oname,_)|Omit]):-
 %%----------------------Para comprobar si hay dependencias----------------
 check_func_deps([], _ , K, K).
 
-check_func_deps([(Rname,[Rel |_])| Rels], Gbpy, Kin, Kfunc):-
-  (my_functional_dependency('$des', Rname, PrimK, Dp) 
+check_func_deps([(Rel,[Rel |_])| Rels], Gbpy, Kin, Kfunc):-
+  (my_functional_dependency('$des', Rel, PrimK, Dp) 
   -> (complete_attr(Rel,PrimK,Pks),
   (member_chck_attr(Pks, Gbpy)
   ->  (complete_attr(Rel,Dp, Dps),
@@ -1953,30 +1866,60 @@ check_func_deps([(Rname,[Rel |_])| Rels], Gbpy, Kin, Kfunc):-
 
 
 
+
+%% Error 22: GROUP BY can be replaced by DISTINCT
+%%   Examples:
+%%    create table s(a int, b int)
+%%    select a,b from s group by a,b   
+
+check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(G),having(H),_O),_AS)):-
+  G \== [],
+  H \== true,
+  extract_attributes(Cs, CsAttrs),                
+  extract_attr_from_group_order_by(G, GAttrs),
+  sort(CsAttrs, CsAttrsSort),
+  sort(GAttrs, GAttrsSort),
+  equal_attr(CsAttrsSort, GAttrsSort),         
+  !,
+  sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT.']).
+check_if_distinct_intead_of_groub_by(_SQLst).
+
+%Auxiliar predicate to extract attributes from Group By clause
+extract_attr_from_group_order_by([], []).
+extract_attr_from_group_order_by([expr(attr(Rel,Name,_),_,_) | Gs], [attr(Rel,Name,_) | GAttrs]):-
+  extract_attr_from_group_order_by(Gs, GAttrs).
+
+%Check that two attributes are equal
+equal_attr([], []).
+equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
+    Rel1 == Rel2,
+    Name1 == Name2,
+    equal_attr(Atts1, Atts2).
+
 %%----------------------------------------Hasta aqui errores del GROUP BY----------------------------------------------------------------------------
 
 
-%% ERROR 23:
-%% UNION can be replace by OR
-%% select distinct * from ((select * from t) union (select * from s));
+%% Error 23: UNION can be replace by OR
+%%     Examples: 
+%%      (select * from t) union (select * from t);
 
 %%Hay que usar esta funcion: check_sql_tautological_condition(PSQLst) :-
 %%PSQLst=(select(Distinct,Top,Offset,PList,TList,From,where(SQLCondition),GroupBy,Having,OrderBy),Schema), % Check, for now, this kind of select statements
 %%  SQLCondition\==true,
 %% en vez de crear la consulta con una unica condicion en el where, despues de haber comprobado que el select y el froms on iguales, llamar a esta funcion con una and de ambos where
 
-check_if_union_by_or((select(_D,_T,_Of,_Cs,_TL,from([(union('distinct', SQLst1, SQLst2, _F))]),_W,_G,_H,_O),_AS)):-
-  %%PSQLst=(select(Distinct,Top,Offset,PList,TList,From,where(SQLCondition),GroupBy,Having,OrderBy),Schema). % Check, for now, this kind of select statements
+
+%%!!!!!!!!!!!!!!!solo lo estoy haciendo para atributos en el cs
+check_if_union_by_or(union(_A, SQLst1, SQLst2), _AS):-
   SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
-  SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL1,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
-  Cs1 == Cs2,
+  SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL2,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
+  sort(Cs1),
+  sort(Cs2),
+  equal_attr(Cs1, Cs2),
   Rels1 == Rels2,
-  check_sql_tautological_condition((select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(and(Cond1, Cond2)),_G1,_H1,_O1),_AS1)),
+  check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3)),
   sql_semantic_error_warning(['UNION can be replaced by OR.']).
-
-
 check_if_union_by_or(_SQLst).
-
 
 %% ERROR 24:
 %% Unnecessary ORDER BY term.
@@ -1987,45 +1930,30 @@ check_if_union_by_or(_SQLst).
 
 %%HAY QUE RESPETAR EL ORDEN???? como busco cuáles son los siguientes de la lista de ordby que cumplen esa condicion de DF?????
 
-check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(Order,_N)),_AS)):-
-  extract_attr_from_order_by(Order, Oby),
-  %%reverse(Oby, Ordby),
-  check_func_deps_order_by(Oby, [], Rels, Cond).
-
+check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
+  extract_attr_from_group_order_by(O, OAttrs),
+  check_func_deps_order_by(OAttrs, [], Rels, Cond).
 check_if_ord_by_is_unnec(_SQLst).
 
 
-%%--------------Extraer los atributos del order by--------------
-extract_attr_from_order_by([], []).
-
-extract_attr_from_order_by([expr(attr(Rel,Attr,_),_,_) | Ops], [attr(Rel,Attr,_) | Obys]):-
-  extract_attr_from_order_by(Ops, Obys).
-
-
-%%----------Funcion para ver las dep funcionales del order by-----------------
-
+% Checking ORDER BY FDs
 check_func_deps_order_by([],_,_,_).
-
-check_func_deps_order_by([attr(R, Attr,_) | Obys], Prevs, Rels, Cond):-
-  add4(Cond, [attr(R, Attr, _)], [], Ktemp),
-( equal_attr(Ktemp, [attr(R, Attr, _)]) 
+check_func_deps_order_by([attr(Rel, Name,_) | OAttrs], Prevs, Rels, Cond):-
+  add4(Cond, [attr(Rel, Name, _)], [], Ktemp),
+  (equal_attr(Ktemp, [attr(Rel, Name, _)]) 
   -> Kout = []
   ;  Kout = Ktemp),
-  check_if_df(Rels, Prevs, [attr(R, Attr,_)], [], Dfs),
+  check_if_df(Rels, Prevs, [attr(Rel, Name,_)], [], Dfs),
   merge_lists(Kout, Dfs, Dfss),
-  sort(Dfss, Dfssnuevo),
-  sort(Prevs, Prevsnuevo),
-  ((equal_attr(Dfssnuevo, Prevsnuevo), Dfssnuevo \== [])
-  -> sql_semantic_error_warning(['Unnecessary ORDER BY term "',Attr,'".'])
+  sort(Dfss, DfssSorted),
+  sort(Prevs, PrevsSorted),
+  ((equal_attr(DfssSorted, PrevsSorted), DfssSorted \== [])
+  -> sql_semantic_error_warning(['Unnecessary ORDER BY term "',Name,'".'])
   ; true),
-  check_func_deps_order_by(Obys, [attr(R, Attr,_) | Prevs], Rels, Cond).
+  check_func_deps_order_by(OAttrs, [attr(Rel, Name,_) | Prevs], Rels, Cond).
 
-
-
-%%------------Comprobar si hay dependencia funcional de un attr con alguno de los anteriores del order by------
 
 check_if_df([],_,_,K,K).
-
 check_if_df([(Rname, [Rel|_]) | Rels], Prevs, Attr, Kin, Kout):-
   (my_functional_dependency('$des', Rname, PrimK, Dp) 
   -> (complete_attr(Rel,PrimK,Pks),
@@ -2036,25 +1964,22 @@ check_if_df([(Rname, [Rel|_]) | Rels], Prevs, Attr, Kin, Kout):-
   ; Kmid = Kin)); true),
   check_if_df(Rels, Prevs, Attr, Kmid, Kout).
 
-%%------------- add modificado------------------
-add4(attr(R1,N1,T1) = attr(R2,N2,T2), Kin, Kin2, Kout):-
-  (memberchk(attr(R1,N1,T1), Kin),
-  \+ memberchk(attr(R2,N2,T2), Kin) %%\+ es not.
-  -> Kin1 = [attr(R2,N2,T2)|Kin2]
+
+add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kin2, Kout):-
+  (memberchk(attr(Rel1,Name1,Id1), Kin),
+  \+ memberchk(attr(Rel2,Name2,Id2), Kin) 
+  -> Kin1 = [attr(Rel2,Name2,Id2)|Kin2]
   ;  Kin1 = Kin2 ),
   (
-  memberchk(attr(R2,N2,T2), Kin),
-  \+ memberchk(attr(R1,N1,T1), Kin) %%\+ es not.
-  -> Kout = [attr(R1,N1,T1)|Kin1]
+  memberchk(attr(Rel2,Name2,Id2), Kin),
+  \+ memberchk(attr(Rel1,Name1,Id1), Kin) 
+  -> Kout = [attr(Rel1,Name1,Id1)|Kin1]
   ;  Kout = Kin1).
-         
-
-
 add4(and(C1,C2), Kin, Kin2, Kout):-
   add4(C1, Kin, Kin2, Kin1),
   add4(C2, Kin1,Kin2, Kout).
-
 add4(_, _, _,[]).
+
 
 %% ERROR 26:
 %% Inefficient UNION
