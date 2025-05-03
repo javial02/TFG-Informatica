@@ -1908,18 +1908,35 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%  SQLCondition\==true,
 %% en vez de crear la consulta con una unica condicion en el where, despues de haber comprobado que el select y el froms on iguales, llamar a esta funcion con una and de ambos where
 
-
 %%!!!!!!!!!!!!!!!solo lo estoy haciendo para atributos en el cs
+%%!!!!!!!!!!!!!!arreglar renombramientos
+%%check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
+
 check_if_union_by_or(union(_A, SQLst1, SQLst2), _AS):-
   SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
   SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL2,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
-  sort(Cs1),
-  sort(Cs2),
-  equal_attr(Cs1, Cs2),
-  Rels1 == Rels2,
+  extract_attributes(Cs1, Cs1Attrs),
+  extract_attributes(Cs2, Cs2Attrs),
+  sort(Cs1Attrs, Cs1Sorted),
+  sort(Cs2Attrs, Cs2Sorted),
+  equal_attr_name(Cs1Sorted, Cs2Sorted),
+  extract_rels(Rels1, Rels1Names),
+  extract_rels(Rels2, Rels2Names),
+  sort(Rels1Names, Rels1NamesSorted),
+  sort(Rels2Names, Rels2NamesSorted),
+  Rels1NamesSorted == Rels2NamesSorted,
   check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3)),
   sql_semantic_error_warning(['UNION can be replaced by OR.']).
 check_if_union_by_or(_SQLst).
+
+equal_attr_name([],[]).
+equal_attr_name([attr(_,Name1,_)|Atts1], [attr(_,Name2,_)|Atts2]) :-
+  Name1 == Name2,
+  equal_attr_name(Atts1, Atts2).
+
+extract_rels([],[]).
+extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
+  extract_rels(Rels, Rnames).
 
 %% ERROR 24:
 %% Unnecessary ORDER BY term.
@@ -1979,8 +1996,3 @@ add4(and(C1,C2), Kin, Kin2, Kout):-
   add4(C1, Kin, Kin2, Kin1),
   add4(C2, Kin1,Kin2, Kout).
 add4(_, _, _,[]).
-
-
-%% ERROR 26:
-%% Inefficient UNION
-%% si no proceden de la misma tabla ambas consultas, habria que usar el algoritmo del distinct en ambas para ver si es necesario ponerlo o no, es decir, si tienen duplicados. Si proceden de la misma tabla, habria que comprobar que 
