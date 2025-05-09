@@ -1712,7 +1712,7 @@ member_chck_attr([attr(_,At,_)|Attr], K):-
 
 check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
   extract_attributes(Cs, CsAttrs),
-  CsAttrs \== [],
+  CsAttrs == [],    %%comprobamos que no hay ningun atributo en el select
   Group \== [],
   extract_attributes_from_equalities_in_cnf(Cond, Res),       
   check_if_group_by_in_k(Res, Group),                         
@@ -1942,57 +1942,69 @@ extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
 %% Unnecessary ORDER BY term.
 %%    create table t(a int, b int)
 %%    select a from t where a = b order by a, b
-%%    create table t(a int primary key, b string determined by a)
+%%    create table t(a int primary key, b int determined by a, c int determined by b)
 %%    select a from t order by a, b
 
-%%HAY QUE RESPETAR EL ORDEN???? como busco cuáles son los siguientes de la lista de ordby que cumplen esa condicion de DF?????
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
   extract_attr_from_group_order_by(O, OAttrs),
-  check_func_deps_order_by(OAttrs, [], Rels, Cond).
+  all_edges(Rels, Edges),
+  add4(Cond, Edges, Edges2),
+  sort(Edges2, EdgesSorted),
+  transitive_closure(EdgesSorted, Closure),
+  check_redundant_attributes(OAttrs, Closure).
 check_if_ord_by_is_unnec(_SQLst).
 
+all_edges([(Rname, [Rel|_])|_], Edges):-
+  my_functional_dependency('$des', Rname, As, Bs),
+  complete_attr(Rel,As,Ass),
+  complete_attr(Rel,Bs,Bss),
+  findall(edge(attr(Rel,A1,_), attr(Rel,B1,_)),(member(attr(Rel, A1, _), Ass), member(attr(Rel, B1, _), Bss)), RawEdges),
+  sort(RawEdges, Edges).
 
-% Checking ORDER BY FDs
-check_func_deps_order_by([],_,_,_).
-check_func_deps_order_by([attr(Rel, Name,_) | OAttrs], Prevs, Rels, Cond):-
-  add4(Cond, [attr(Rel, Name, _)], [], Ktemp),
-  (equal_attr(Ktemp, [attr(Rel, Name, _)]) 
-  -> Kout = []
-  ;  Kout = Ktemp),
-  check_if_df(Rels, Prevs, [attr(Rel, Name,_)], [], Dfs),
-  merge_lists(Kout, Dfs, Dfss),
-  sort(Dfss, DfssSorted),
-  sort(Prevs, PrevsSorted),
-  ((equal_attr(DfssSorted, PrevsSorted), DfssSorted \== [])
-  -> sql_semantic_error_warning(['Unnecessary ORDER BY term "',Name,'".'])
-  ; true),
-  check_func_deps_order_by(OAttrs, [attr(Rel, Name,_) | Prevs], Rels, Cond).
+transitive_closure(Edges, Closure) :-
+  closure_step(Edges, Edges, Closure).
+
+closure_step(_, Current, Current) :-
+  \+ ( member(edge(X, Y), Current),
+        member(edge(Y, Z), Current),
+        \+ member(edge(X, Z), Current),
+        X \= Z
+      ).
+
+closure_step(_, Current, Closure) :-
+  findall(edge(X, Z),
+      (   member(edge(X, Y), Current),
+          member(edge(Y, Z), Current),
+          \+ member(edge(X, Z), Current),
+          X \= Z
+      ),
+      NewEdges),
+  append(Current, NewEdges, Combined),
+  sort(Combined, Next),
+  closure_step(_, Next, Closure).
 
 
-check_if_df([],_,_,K,K).
-check_if_df([(Rname, [Rel|_]) | Rels], Prevs, Attr, Kin, Kout):-
-  (my_functional_dependency('$des', Rname, PrimK, Dp) 
-  -> (complete_attr(Rel,PrimK,Pks),
-  (member_chck_attr(Pks, Prevs)
-  ->  (complete_attr(Rel,Dp, Dps),
-  check_if_is_df(Rel,Dps, Attr, [], _), 
-  merge_lists(Kin, Pks, Kmid))
-  ; Kmid = Kin)); true),
-  check_if_df(Rels, Prevs, Attr, Kmid, Kout).
+check_redundant_attributes(C, Closure) :-
+  forall((member(C1, C) , C1 = attr(_, Name,_)),
+      (   findall(C2,
+              (   member(edge(C2, C1), Closure),
+                  C2 \= C1,
+                  member(C2, C)
+              ),
+              C2List),
+          (   C2List \= []
+          ->  sql_semantic_error_warning(['Unnecessary ORDER BY term "',Name,'".'])
+          ;   true
+          )
+      )).
 
 
-add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kin2, Kout):-
-  (memberchk(attr(Rel1,Name1,Id1), Kin),
-  \+ memberchk(attr(Rel2,Name2,Id2), Kin) 
-  -> Kin1 = [attr(Rel2,Name2,Id2)|Kin2]
-  ;  Kin1 = Kin2 ),
-  (
-  memberchk(attr(Rel2,Name2,Id2), Kin),
-  \+ memberchk(attr(Rel1,Name1,Id1), Kin) 
-  -> Kout = [attr(Rel1,Name1,Id1)|Kin1]
-  ;  Kout = Kin1).
-add4(and(C1,C2), Kin, Kin2, Kout):-
-  add4(C1, Kin, Kin2, Kin1),
-  add4(C2, Kin1,Kin2, Kout).
-add4(_, _, _,[]).
+add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
+  Kmid = [edge(attr(Rel2,Name2,Id2), attr(Rel1,Name1,Id1)) | Kin],
+  Kout = [edge(attr(Rel1,Name1,Id1), attr(Rel2,Name2,Id2)) | Kmid].
+  
+add4(and(C1,C2), Kin,Kout):-
+  add4(C1, Kin, Kin1),
+  add4(C2, Kin1,Kout).
+add4(_, _,[]).
