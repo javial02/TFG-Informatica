@@ -1743,51 +1743,15 @@ check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),gr
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
-  extract_attr_from_group_order_by(Group, AttsGBY),     %%atributos presentes en el group by
-  loop_add(Cond, [], Kfin),      %%relaciones de A=B en where
 
-  check_func_deps(Rels, AttsGBY, [], Kfunc), 
-  (member_chck_attr(Kfunc, K)                 %% si los atributos del gby que tienen df estan en el select o en having, no se hace nada
-  -> Kfunc = []
-  ; true),     
-  check_attributes_from_grby(AttsGBY, Kfin, Dps),  %%guardamos los atributos del group by dependientes entre ellos en la lista Dps
-  (Dps \== []
-    -> validate_dps(Dps, K, Omit)                  %%comprobar cuales son los atributos de group by de podemos omitir
-    ; Omit = []),                
-  merge_lists(Omit, Kfunc, Omits),                %%Unimos las listas de DF y las de igualdades en el where
-  sort(Omits, Omitsnueva),                        %%Eliminamos duplicados
-  warning_message_21(Omitsnueva).                       %%imprimir mensaje
-
+  extract_attr_from_group_order_by(Group, GAttrs),
+  all_edges(Rels, Edges),
+  add4(Cond, Edges, Edges2),
+  sort(Edges2, EdgesSorted),
+  transitive_closure(EdgesSorted, Closure),
+  check_redundant_attributes_gby(GAttrs, Closure, K). %%AQUI HAY QUE PASARLE LA LISTA K que tiene los attr que estan en Select o Hvaing porque en ese caso no salta warning
+  %%Faltaría añadir a este predicado que una vez vea si es dependiente funcionalmente, que también compruebe que no está en la lista K
 check_if_attr_grp_by_is_unnec(_SQLst).
-
-
-%%----------------------Loop para añadir las dependencias del where------------
-loop_add(Cond, Kin, KoutFinal) :-
-  add3(Cond, Kin, Kmid),      
-  ( Kin \== Kmid 
-    -> loop_add(Cond, Kmid, KoutFinal)
-     ; KoutFinal = Kmid ).
-
-loop_add(_, K, K).  % Caso base: Si Kin == Kout, detener el bucle.
-
-add3(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
-  (%memberchk(attr(Rel1,Name1,Id1), Kin),
-  \+ memberchk(attr(Rel2,Name2,Id2), Kin) %%\+ es not.
-  -> Kin1 = [attr(Rel2,Name2,Id2)|Kin]
-  ;  Kin1 = Kin ),
-  (Kin == Kin1 ,
-  %memberchk(attr(Rel2,Name2,Id2), Kin1),
-  \+ memberchk(attr(Rel1,Name1,Id1), Kin1) %%\+ es not.
-  -> Kout = [attr(Rel1,Name1,Id1)|Kin1]
-  ;  Kout = Kin1).
-         
-
-
-add3(and(C1,C2), Kin, Kout):-
-  add3(C1, Kin, Kin1),
-  add3(C2, Kin1, Kout).
-
-add3(_, Kin, Kin).
 
 
 %%-----------------Add para añadir los atr del having------------
@@ -1809,62 +1773,20 @@ add2(and(C1,C2), Kin, Kout):-
 
 add2(_, Kin, Kin).
 
-
-
-
-%%------------------------Para ver que terminos del group by tienen dependencia directa--------------
-% Caso base: lista vacía produce lista vacía
-check_attributes_from_grby([], _, []).
-
-% Si el atributo está en Kfin, lo añadimos a ValidRest
-check_attributes_from_grby([Attr|Rest], Kfin, [Attr|ValidRest]) :-
-  memberchk(Attr, Kfin),  
-  check_attributes_from_grby(Rest, Kfin, ValidRest).
-
-% Si el atributo NO está en Kfin, simplemente lo ignoramos y seguimos
-check_attributes_from_grby([_Attr|Rest], Kfin, ValidRest) :-
-  check_attributes_from_grby(Rest, Kfin, ValidRest).
-
-%%--------------------------Funcion para sacar los atributos que se pueden omitir en el group by------
-% Predicado principal que comprueba el tamaño de Dps y filtra los elementos no presentes en K.
-validate_dps(Dps, K, Aux) :-
-  % Verifica que Dps tenga al menos dos elementos
-  Dps = [_,_|_],
-  % Filtra los elementos que no están en K
-  filter_not_in(Dps, K, [], Aux).
-
-% Caso base: la lista vacía devuelve la auxiliar acumulada
-filter_not_in([], _K, AuxT, AuxT).
-
-% Caso recursivo: construye AuxT correctamente
-filter_not_in([H|T], K, AuxT, AuxT2) :-
-  (\+ memberchk(H, K)
-    -> AuxMid = [H|AuxT]
-    ;  AuxMid = AuxT),
-  filter_not_in(T, K, AuxMid, AuxT2).
-
-%%------------------------imprimir mensaje de error 21--------------
-warning_message_21([]).
-
-warning_message_21([attr(_,Oname,_)|Omit]):-
-  sql_semantic_error_warning(['Unnecessary GROUP BY attribute "',Oname, '".']),
-  warning_message_21(Omit).
-
-
-%%----------------------Para comprobar si hay dependencias----------------
-check_func_deps([], _ , K, K).
-
-check_func_deps([(Rel,[Rel |_])| Rels], Gbpy, Kin, Kfunc):-
-  (my_functional_dependency('$des', Rel, PrimK, Dp) 
-  -> (complete_attr(Rel,PrimK,Pks),
-  (member_chck_attr(Pks, Gbpy)
-  ->  (complete_attr(Rel,Dp, Dps),
-  check_if_is_df(Rel,Dps, Gbpy, [], Dpss), 
-  merge_lists(Kin, Dpss, Kmid))
-  ; Kmid = Kin)); true),
-  check_func_deps(Rels, Gbpy, Kmid, Kfunc).
-
-
+check_redundant_attributes_gby(C, Closure, K) :-
+  forall((member(C1, C) , C1 = attr(_, Name,_)),
+      (   findall(C2,
+              (   member(edge(C2, C1), Closure),
+                  C2 \= C1,
+                  member(C2, C),
+                  \+member_chck_attr(C1, K)
+              ),
+              C2List),
+          (   C2List \= []
+          ->  sql_semantic_error_warning(['Unnecessary GROUP BY term "',Name,'".'])
+          ;   true
+          )
+      )).
 
 
 %% Error 22: GROUP BY can be replaced by DISTINCT
