@@ -1735,9 +1735,14 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    select a from j where a = b group by a,b
 %%    Positive example -> select a from j where a = b group by a,b having b = 1
 %%    With DF
-%%    create table t(a int primary key, b string determined by a)
+%%    create or replace table t(a int primary key, b string determined by a)
 %%    select a from t  group by a,b 
 %%    Positive example -> select a,b from t group by a,b 
+%%    create or replace table t(a int primary key, b string determined by a, c int determined by b)
+%%    select a from t group by c, a, b
+%%    select a from t where a = c group by c, a, b
+%%    select a from t group by a,b having b = 1
+%%    Positive example -> select a from t group by a,b having a = 1
 
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
@@ -1745,7 +1750,7 @@ check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),gr
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
 
   extract_attr_from_group_order_by(Group, GAttrs),
-  all_edges(Rels, Edges),
+  all_edges(Rels,[], Edges),
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
@@ -1755,31 +1760,37 @@ check_if_attr_grp_by_is_unnec(_SQLst).
 
 
 %%-----------------Add para añadir los atr del having------------
-add2(attr(R, N, _) = _, Kin, Kout) :- 
-  %member(Op, [=, >, <, >=, =<]),
-  (\+ memberchk(attr(R,N,_), Kin)
-  ->  Kout = [attr(R, N, _)|Kin]
-  ;   Kout = Kin).
-add2(_ = attr(R, N, _), Kin, Kout) :- 
-  %member(Op, [=, >, <, >=, =<]),
-  (\+ memberchk(attr(R,N,_), Kin)
-  ->  Kout = [attr(R, N, _)|Kin]
-  ;   Kout = Kin).
-         
+% Caso: comparación entre attr(...) y constante
+add2(Expr, Kin, Kout) :-
+    Expr =.. [Op, attr(R, N, _), _],
+    member(Op, [=, >, <, >=, =<]),
+    ( \+ memberchk(attr(R, N, _), Kin)
+    -> Kout = [attr(R, N, _)|Kin]
+    ;  Kout = Kin).
 
-add2(and(C1,C2), Kin, Kout):-
-  add2(C1, Kin, Kin1),
-  add2(C2, Kin1, Kout).
+% Caso: comparación entre constante y attr(...)
+add2(Expr, Kin, Kout) :-
+    Expr =.. [Op, _, attr(R, N, _)],
+    member(Op, [=, >, <, >=, =<]),
+    ( \+ memberchk(attr(R, N, _), Kin)
+    -> Kout = [attr(R, N, _)|Kin]
+    ;  Kout = Kin).
 
+% Caso: conjunción and(C1, C2)
+add2(and(C1, C2), Kin, Kout) :-
+    add2(C1, Kin, Kmid),
+    add2(C2, Kmid, Kout).
+
+% Cualquier otra cosa: ignorar
 add2(_, Kin, Kin).
 
+
 check_redundant_attributes_gby(C, Closure, K) :-
-  forall((member(C1, C) , C1 = attr(_, Name,_)),
+  forall((member(C1, C) , C1 = attr(_, Name,_), \+ member_chck_attr([C1], K)),
       (   findall(C2,
               (   member(edge(C2, C1), Closure),
                   C2 \= C1,
-                  member(C2, C),
-                  \+member_chck_attr(C1, K)
+                  member(C2, C)
               ),
               C2List),
           (   C2List \= []
@@ -1862,27 +1873,34 @@ extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
 
 %% ERROR 24:
 %% Unnecessary ORDER BY term.
-%%    create table t(a int, b int)
+%%    create or replace table t(a int, b int)
 %%    select a from t where a = b order by a, b
-%%    create table t(a int primary key, b int determined by a, c int determined by b)
+%%    create or replace table t(a int primary key, b int determined by a, c int determined by b)
 %%    select a from t order by a, b
 
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
   extract_attr_from_group_order_by(O, OAttrs),
-  all_edges(Rels, Edges),
+  all_edges(Rels, [], Edges),
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
   check_redundant_attributes(OAttrs, Closure).
 check_if_ord_by_is_unnec(_SQLst).
 
-all_edges([(Rname, [Rel|_])|_], Edges):-
-  my_functional_dependency('$des', Rname, As, Bs),
-  complete_attr(Rel,As,Ass),
-  complete_attr(Rel,Bs,Bss),
-  findall(edge(attr(Rel,A1,_), attr(Rel,B1,_)),(member(attr(Rel, A1, _), Ass), member(attr(Rel, B1, _), Bss)), RawEdges),
-  sort(RawEdges, Edges).
+all_edges([],K,K).
+
+all_edges([(Rname, [Rel|_])|Rels],Kin, Edges):-
+  findall(edge(attr(Rel,A1,_), attr(Rel,B1,_)),(my_functional_dependency('$des', Rname, As, Bs),
+  complete_attr(Rel,As,Ass),complete_attr(Rel,Bs,Bss),member(attr(Rel, A1, _), Ass), member(attr(Rel, B1, _), Bss)), RawEdges),
+  sort(RawEdges, RawEdgesSorted),
+  merge_edges(RawEdgesSorted, Kin, EdgesMid),
+  all_edges(Rels, EdgesMid, Edges).
+
+merge_edges(X, Y, Z) :-
+  append(X, Y, Aux),
+  sort(Aux, Z).
+
 
 transitive_closure(Edges, Closure) :-
   closure_step(Edges, Edges, Closure).
@@ -1929,4 +1947,6 @@ add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
 add4(and(C1,C2), Kin,Kout):-
   add4(C1, Kin, Kin1),
   add4(C2, Kin1,Kout).
-add4(_, _,[]).
+add4(_, K,K).
+
+
