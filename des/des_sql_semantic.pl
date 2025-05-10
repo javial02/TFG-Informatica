@@ -156,7 +156,7 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_group_by_with_singleton_groups(SQLst),            % Error 19
   check_group_by_only_with_one_group(SQLst),              % Error 20
   check_if_attr_grp_by_is_unnec(SQLst),                   % Error 21
-  check_if_union_by_or(SQLst),                            % Error 23
+  %%check_if_union_by_or(SQLst, Bss),                       % Error 23
   check_if_ord_by_is_unnec(SQLst).                        % Error 24
   
   
@@ -1628,9 +1628,9 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 %% Examples: 
 %%    create table t(a int primary key, b int)
 %%    select a from t group by a 
-%%    create table s(a int, b int, primary key (a,b))
+%%    create or replace table s(a int, b int, primary key (a,b))
 %%    select a,b from s group by a,b
-%%    create table t(a int candidate key, b int)
+%%    create or replace table t(a int candidate key, b int)
 %%    select a from t group by a 
 %%    create table s(a int, b int, candidate key (a,b))
 %%    select a,b from s group by a,b
@@ -1639,18 +1639,26 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),_W,group_by(G),_H,_O),_AS)):-
   G \== [],
-  extract_pks_and_df_from_gby(Rels, G, [], K),       
-  extract_attr_from_group_order_by(G, GAttrs),
-  sort(K, Ksort),
-  sort(GAttrs, GAttrsSort),
-  equal_attr(Ksort, GAttrsSort),         
-  !,
-  sql_semantic_error_warning(['GROUP BY with singleton groups']).
+  extract_pks_and_ck_from_gby(Rels, G, [], K), 
+  extract_attr_from_group_order_by(G, GAttrs), 
+  sort(K, Ksorted),
+  sort(GAttrs, GAttrsSorted),
+  ((member_chck_attr(Ksorted, GAttrsSorted), member_chck_attr(GAttrsSorted, Ksorted)) 
+  -> 
+  sql_semantic_error_warning(['GROUP BY with singleton groups.'])
+  ;(all_edges(Rels,[], Edges),
+    transitive_closure(Edges, Closure),
+    check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout),
+    merge_lists(KSorted, Kout, Kfin),
+    (member_chck_attr(GAttrsSorted, Kfin) 
+    -> 
+    sql_semantic_error_warning(['GROUP BY with singleton groups.']))))
+    .
 check_group_by_with_singleton_groups(_SQLst).
 
-% To extract PKs, CKs and FDs
-extract_pks_and_df_from_gby([], _, K, K).
-extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-    
+% To extract PKs, CKs
+extract_pks_and_ck_from_gby([], _, K, K).
+extract_pks_and_ck_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-    
   (my_primary_key('$des', Rname, Atts)
   -> complete_attr(Rel, Atts, Attrs)
   ; Attrs = []),
@@ -1660,36 +1668,14 @@ extract_pks_and_df_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-
   ; Attrs3 = Attrs),
   check_if_is_pk(Rel,Attrs3, Group, [], Pk),
   merge_lists(Pk, Kini, Kmid1),
-  (my_functional_dependency('$des', Rname, PrimK, Dp) 
-  -> (complete_attr(Rel,PrimK,Pks),
-  (member_chck_attr(Pk, Pks)
-  ->  (complete_attr(Rel,Dp, Dps),
-  check_if_is_df(Rel,Dps, Group, [], Dpss),
-  merge_lists(Kmid1, Dpss, Kmid2))
-  ; true))
-  ; Kmid2 = Kmid1),  
-  extract_pks_and_df_from_gby(Rels, Group, Kmid2, KFinal).
+  extract_pks_and_ck_from_gby(Rels, Group, Kmid1, KFinal).
 
-%% Check if Gby attr equals to PK
 check_if_is_pk(_,_, [], Pks, Pks).
 check_if_is_pk(Rel,Atts, [expr(attr(Rel,Name,_),_,_) | Gps], Pks, PksFinal):-
   (memberchk(attr(Rel,Name,_), Atts)
     -> Pkmid = [attr(Rel,Name,_)| Pks]
     ; Pkmid = Pks),
   check_if_is_pk(Rel,Atts, Gps, Pkmid, PksFinal).
-
-%% Check if Gby attr equals to FD
-check_if_is_df(_,_, [], Dps, Dps).
-check_if_is_df(Rel,Dp, [expr(attr(Rel,Name,_),_,_) | Gps], Dpini, DpFinal):-
-  (memberchk(attr(Rel,Name,_), Dp)
-  -> Dpmid = [attr(Rel,Name,_)| Dpini]
-  ; Dpmid = Dpini),
-  check_if_is_df(Rel,Dp, Gps, Dpmid, DpFinal).
-check_if_is_df(Rel,Dp, [Gp | Gps], Dpini, DpFinal):-
-  (memberchk(Gp, Dp)
-  -> Dpmid = [Gp| Dpini]
-  ; Dpmid = Dpini),
-  check_if_is_df(Rel,Dp, Gps, Dpmid, DpFinal).
 
 %% To complete attributes
 complete_attr(_,[],[]).
@@ -1701,6 +1687,16 @@ member_chck_attr([], _).
 member_chck_attr([attr(_,At,_)|Attr], K):-
   memberchk(attr(_,At,_), K),
   member_chck_attr(Attr, K).
+
+check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout) :-
+    findall(G,
+        (   member(G, GAttrsSorted),
+            member(K, KSorted),
+            \+equal_attr([G], [K]),
+            member(edge(K, G), Closure)                       %%AQUIII PETAAA
+        ),
+        Kout).
+
 
 
 %% Error 20: GROUP BY with only a single group
@@ -1754,8 +1750,7 @@ check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),gr
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
-  check_redundant_attributes_gby(GAttrs, Closure, K). %%AQUI HAY QUE PASARLE LA LISTA K que tiene los attr que estan en Select o Hvaing porque en ese caso no salta warning
-  %%Faltaría añadir a este predicado que una vez vea si es dependiente funcionalmente, que también compruebe que no está en la lista K
+  check_redundant_attributes_gby(GAttrs, Closure, K). 
 check_if_attr_grp_by_is_unnec(_SQLst).
 
 
@@ -1845,31 +1840,47 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%!!!!!!!!!!!!!!arreglar renombramientos
 %%check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
 
-check_if_union_by_or(union(_A, SQLst1, SQLst2), _AS):-
-  SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
-  SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL2,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
-  extract_attributes(Cs1, Cs1Attrs),
-  extract_attributes(Cs2, Cs2Attrs),
-  sort(Cs1Attrs, Cs1Sorted),
-  sort(Cs2Attrs, Cs2Sorted),
-  equal_attr_name(Cs1Sorted, Cs2Sorted),
-  extract_rels(Rels1, Rels1Names),
-  extract_rels(Rels2, Rels2Names),
-  sort(Rels1Names, Rels1NamesSorted),
-  sort(Rels2Names, Rels2NamesSorted),
-  Rels1NamesSorted == Rels2NamesSorted,
-  check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3)),
-  sql_semantic_error_warning(['UNION can be replaced by OR.']).
-check_if_union_by_or(_SQLst).
+%% check_if_union_by_or((union(_A, SQLst1, SQLst2), _AS), Bss):-
+%%   SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
+%%   SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL2,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
+%%   extract_attributes(Cs1, Cs1Attrs),
+%%   extract_attributes(Cs2, Cs2Attrs),
+%%   sort(Cs1Attrs, Cs1Sorted),
+%%   sort(Cs2Attrs, Cs2Sorted),
+%%   equal_attr_name(Cs1Sorted, Cs2Sorted),
+%%   extract_rels(Rels1, Rels1Names),
+%%   extract_rels(Rels2, Rels2Names),
+%%   sort(Rels1Names, Rels1NamesSorted),
+%%   sort(Rels2Names, Rels2NamesSorted),
+%%   Rels1NamesSorted == Rels2NamesSorted,
+%%   check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3)),
+%%   sql_semantic_error_warning(['UNION can be replaced by OR.']).
+%% check_if_union_by_or(_SQLst).
 
-equal_attr_name([],[]).
-equal_attr_name([attr(_,Name1,_)|Atts1], [attr(_,Name2,_)|Atts2]) :-
-  Name1 == Name2,
-  equal_attr_name(Atts1, Atts2).
+%% equal_attr_name([],[]).
+%% equal_attr_name([attr(_,Name1,_)|Atts1], [attr(_,Name2,_)|Atts2]) :-
+%%   Name1 == Name2,
+%%   equal_attr_name(Atts1, Atts2).
 
-extract_rels([],[]).
-extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
-  extract_rels(Rels, Rnames).
+%% extract_rels([],[]).
+%% extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
+%%   extract_rels(Rels, Rnames).
+
+%% check_union_dlog([((H :- B1), (H :- B2))], H :- Bs):-
+%%   conj2list(B1, B1s),
+%%   conj2list(B2, B2s),
+%%   unify_tables(B1s, B2s),
+%%   append(B1s, B2s, Bs).
+
+%% unify_tables([T|B1s], B2s):-
+%%   my_table(T),
+%%   unify_tables_list(T,B2s).
+
+%% unify_tables_list(T, [T | B2s]).
+%% unify_tables_list(T, [_ | B2s]):-
+%%   unify_tables_list(T, B2s).
+
+  
 
 %% ERROR 24:
 %% Unnecessary ORDER BY term.
