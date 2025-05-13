@@ -1640,8 +1640,11 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 %%    select a,b from t group by a,b,c
 %%    Positive example -> create or replace table t(a int, b int determined by a)
 %%    select a,b from t group by a,b
+%%    create or replace table t(a int primary key, b int)
+%%    Positive example -> select a,b from t group by a,b
+%%    select a,b from t where a = b group by a,b
 
-check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),_W,group_by(G),_H,_O),_AS)):-
+check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS)):-
   G \== [],
   extract_pks_and_ck_from_gby(Rels, G, [], K), 
   extract_attr_from_group_order_by(G, GAttrs), 
@@ -1651,7 +1654,8 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),_W,gro
   -> 
   sql_semantic_error_warning(['GROUP BY with singleton groups.'])
   ;(all_edges(Rels,[], Edges),
-    transitive_closure(Edges, Closure),
+    add4(Cond, Edges, Edges2),
+    transitive_closure(Edges2, Closure),
     check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout),
     merge_lists(KSorted, Kout, Kfin),
     (member_chck_attr(GAttrsSorted, Kfin) 
