@@ -1900,6 +1900,8 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%    select a from t where a = b order by a, b
 %%    create or replace table t(a int primary key, b int determined by a, c int determined by b)
 %%    select a from t order by a, b
+%%    create or replace table t(a int primary key, b int)
+%%    select a from t order by a, b
 
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
@@ -1911,14 +1913,38 @@ check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,
   check_redundant_attributes(OAttrs, Closure).
 check_if_ord_by_is_unnec(_SQLst).
 
-all_edges([],K,K).
+all_edges([], K, K).
 
-all_edges([(Rname, [Rel|_])|Rels],Kin, Edges):-
-  findall(edge(attr(Rel,A1,_), attr(Rel,B1,_)),(my_functional_dependency('$des', Rname, As, Bs),
-  complete_attr(Rel,As,Ass),complete_attr(Rel,Bs,Bss),member(attr(Rel, A1, _), Ass), member(attr(Rel, B1, _), Bss)), RawEdges),
-  sort(RawEdges, RawEdgesSorted),
-  merge_edges(RawEdgesSorted, Kin, EdgesMid),
+all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
+
+  findall(edge(attr(Rel, A1, _), attr(Rel, B1, _)), (
+      my_functional_dependency('$des', Rname, As, Bs),
+      complete_attr(Rel, As, Ass),
+      complete_attr(Rel, Bs, Bss),
+      member(attr(Rel, A1, _), Ass),
+      member(attr(Rel, B1, _), Bss)
+  ), RawEdges),
+
+  
+  findall(edge(KAttr, AAttr), (
+      my_primary_key('$des', Rname, KeyAtts),
+      complete_attr(Rel, KeyAtts, CKAtts),
+      member(KAttr, CKAtts),
+      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
+      exclude(attr_in_list(CKAtts), AllAttrs, NonKeyAttrs),
+      member(AAttr, NonKeyAttrs)
+  ), PKEdges),
+
+  
+  append(RawEdges, PKEdges, AllRawEdges),
+  sort(AllRawEdges, AllEdgesSorted),
+  merge_edges(AllEdgesSorted, Kin, EdgesMid),
   all_edges(Rels, EdgesMid, Edges).
+
+
+attr_in_list(CKAtts, attr(_, Name, _)) :-
+    member(attr(_, Name, _), CKAtts).
+
 
 merge_edges(X, Y, Z) :-
   append(X, Y, Aux),
