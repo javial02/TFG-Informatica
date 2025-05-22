@@ -130,6 +130,7 @@ check_sql_semantic_error((with(_SQLst,_SQLsts),_AS),_RNVss,_ARs). % Warning: TOD
   
 
 check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
+  %% añadir el calculo del cierre transitivo
   ruleNVs_to_rule_NVs_list(RNVss,Rs,NVss),
   rule_head_body_goals_list(Rs,Hs,Bss),
   check_sql_inconsistent_condition(Rs,ARs),               % Error  1
@@ -1884,11 +1885,12 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 
 %% unify_tables([T|B1s], B2s):-
 %%   my_table(T),
-%%   unify_tables_list(T,B2s).
+%%   unify_table_list(T,B2s).
 
-%% unify_tables_list(T, [T | B2s]).
-%% unify_tables_list(T, [_ | B2s]):-
-%%   unify_tables_list(T, B2s).
+%% unify_table_list(T, [T | B2s]):-
+%%  !.
+%% unify_table_list(T, [_ | B2s]):-
+%%   unify_table_list(T, B2s).
 
   
 
