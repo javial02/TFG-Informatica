@@ -154,11 +154,11 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_unnec_distinct(SQLst),                        % Error 2
   check_group_by_in_exists_subqry(SQLst),                 % Error 18
   check_if_distinct_intead_of_groub_by(SQLst),            % Error 22
-  check_group_by_with_singleton_groups(SQLst),            % Error 19
+  check_group_by_with_singleton_groups(SQLst,Closure),    % Error 19
   check_group_by_only_with_one_group(SQLst),              % Error 20
-  check_if_attr_grp_by_is_unnec(SQLst),                   % Error 21
-  %%check_if_union_by_or(SQLst, Bss),                       % Error 23
-  check_if_ord_by_is_unnec(SQLst).                        % Error 24
+  check_if_attr_grp_by_is_unnec(SQLst,Closure),                   % Error 21
+  %%check_if_union_by_or(SQLst, Bss),                     % Error 23
+  check_if_ord_by_is_unnec(SQLst,Closure).                % Error 24
   
   
 %% Error 1: Inconsistent condition.
@@ -1656,26 +1656,27 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 %%    Positive example -> select a,b from t group by a,b
 %%    select a,b from t where a = b group by a,b
 
-check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS)):-
+check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS), Closure):-
   G \== [],
   extract_pks_and_ck_from_gby(Rels, G, [], K), 
   extract_attr_from_group_order_by(G, GAttrs), 
   sort(K, KSorted),
   sort(GAttrs, GAttrsSorted),
+  extract_fds_from_relations(Rels,[], Edges),
+  add4(Cond, Edges, Edges2),
+  sort(Edges2, EdgesSorted),
+  transitive_closure(EdgesSorted, Closure),
   ((member_chck_attr(KSorted, GAttrsSorted), member_chck_attr(GAttrsSorted, KSorted)) 
   -> 
   sql_semantic_error_warning(['GROUP BY with singleton groups.'])
-  ;(extract_fds_from_relations(Rels,[], Edges),
-    add4(Cond, Edges, Edges2),
-    transitive_closure(Edges2, Closure),
-    check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout),
+  ;(check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout),
     merge_lists(KSorted, Kout, Kfin),
     (member_chck_attr(GAttrsSorted, Kfin) 
     -> 
     sql_semantic_error_warning(['GROUP BY with singleton groups.']);
     true)))
     .
-check_group_by_with_singleton_groups(_SQLst).
+check_group_by_with_singleton_groups(_SQLst,_Closure).
 
 % To extract PKs, CKs
 extract_pks_and_ck_from_gby([], _, K, K).
@@ -1761,18 +1762,14 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    select a from t where a = c group by c, a, b
 %%    Positive example -> select a from t group by a,b having b = 1
 
-check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
+check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),_W,group_by(Group),having(Having),_O),_AS), Closure):-
   extract_attributes(Cs, Rels,Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
 
   extract_attr_from_group_order_by(Group, GAttrs),
-  extract_fds_from_relations(Rels,[], Edges),
-  add4(Cond, Edges, Edges2),
-  sort(Edges2, EdgesSorted),
-  transitive_closure(EdgesSorted, Closure),
   check_redundant_attributes_gby(GAttrs, Closure, K). 
-check_if_attr_grp_by_is_unnec(_SQLst).
+check_if_attr_grp_by_is_unnec(_SQLst, _Closure).
 
 
 %%-----------------Add para añadir los atr del having------------
@@ -1915,14 +1912,10 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%    select a from t order by a, b
 
 
-check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
+check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,order_by(O,_N)),_AS), Closure):-
   extract_attr_from_group_order_by(O, OAttrs),
-  extract_fds_from_relations(Rels, [], Edges),
-  add4(Cond, Edges, Edges2),
-  sort(Edges2, EdgesSorted),
-  transitive_closure(EdgesSorted, Closure),
   check_redundant_attributes(OAttrs, Closure).
-check_if_ord_by_is_unnec(_SQLst).
+check_if_ord_by_is_unnec(_SQLst, _Closure).
 
 extract_fds_from_relations([], K, K).
 
