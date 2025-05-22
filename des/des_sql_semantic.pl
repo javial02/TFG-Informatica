@@ -141,7 +141,7 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_sql_unnecessary_join(Bss,NVss),                   % Error  6
                                                           % Error  7 (processed in sql_to_dl)
   check_sql_tautological_condition(SQLst),                % Error  8 (also processed in post_table_constraint)
-  check_sql_null_tautological_inconsistent_condition_improved(SQLst, Rs), % Error  8 for IS [NOT] NULL
+  check_sql_null_tautological_inconsistent_condition(SQLst, Rs), % Error  8 for IS [NOT] NULL (Modified by Javier Amado Lázaro)
   check_sql_null_comparison(SQLst),                       % Error  9
   check_sql_general_comparison(SQLst),                    % Error 11
   check_sql_like(SQLst),                                  % Error 12
@@ -964,10 +964,10 @@ check_sql_tautological_condition(Condition,Rs,ARs,ExpandCtrs) :-
 % check_sql_null_tautological_inconsistent_condition(+Rs). 
 % Check whether is_null / is_not_null is applied to a not-nullable column
 
-check_sql_null_tautological_inconsistent_condition_improved((select(_AD,_T,_Of,_Cs,_TL,from(Rels),_W,_G,_H,_O),_AS), Rs):-
+check_sql_null_tautological_inconsistent_condition((select(_AD,_T,_Of,_Cs,_TL,from(Rels),_W,_G,_H,_O),_AS), Rs):-
   extract_not_nullable_tables(Rels, [], Tnames),
-  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
-check_sql_null_tautological_inconsistent_condition_improved(_SQLst, []).
+  check_sql_null_tautological_inconsistent_condition_rs(Rs, Tnames).
+check_sql_null_tautological_inconsistent_condition(_SQLst, []).
 
 %Extract names of not nullable tables to cover fake positives
 extract_not_nullable_tables([], K, K).
@@ -983,16 +983,16 @@ extract_not_nullable_tables([(full_join((Tname1, _), (Tname2, _), _),_) | Rels],
 extract_not_nullable_tables([_| Rels], Kin, Kout):-
   extract_not_nullable_tables(Rels, Kin, Kout).
 
-check_sql_null_tautological_inconsistent_condition([], _).
-check_sql_null_tautological_inconsistent_condition([(_H :- B)|Rs], Tnames) :-     %%añadimos el parametro Tnames que será una lista de tablas dosnde en funcion que el join que sea guardaremos las tablas que no aplican a este predicado
+check_sql_null_tautological_inconsistent_condition_rs([], _).
+check_sql_null_tautological_inconsistent_condition_rs([(_H :- B)|Rs], Tnames) :-     %%añadimos el parametro Tnames que será una lista de tablas dosnde en funcion que el join que sea guardaremos las tablas que no aplican a este predicado
   !,
   my_list_to_tuple(Bs,B),
   all_user_predicate_goals(Bs,Gs),
   not_null_source_vars_list(Tnames,Gs,SGs,NNVs),
   check_sql_null_list(Bs,SGs,NNVs),
-  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
-check_sql_null_tautological_inconsistent_condition([_Fact|Rs], Tnames) :-
-  check_sql_null_tautological_inconsistent_condition(Rs, Tnames).
+  check_sql_null_tautological_inconsistent_condition_rs(Rs, Tnames).
+check_sql_null_tautological_inconsistent_condition_rs([_Fact|Rs], Tnames) :-
+  check_sql_null_tautological_inconsistent_condition_rs(Rs, Tnames).
   
 not_null_source_vars_list(Tnames,Gs,SGs,NNVs) :-
   not_null_source_vars_list(Tnames,Gs,[],SGs,[],NNVs).
