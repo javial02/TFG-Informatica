@@ -1,21 +1,28 @@
-CREATE TABLE T(A INT PRIMARY KEY, B INT);
-CREATE TABLE S(A INT, B INT, PRIMARY KEY (A, B));
-CREATE OR REPLACE TABLE T(A INT CANDIDATE KEY, B INT);
-CREATE OR REPLACE TABLE S(A INT, B INT, CANDIDATE KEY (A, B));
-CREATE OR REPLACE TABLE T(A INT PRIMARY KEY, B STRING DETERMINED BY A);
-CREATE TABLE t (a INT PRIMARY KEY, b INT, c INT);
-CREATE TABLE u (a INT, b INT, c INT);
+create table t(a int primary key, b int);
+create table s(a int, b int, primary key (a, b));
+create or replace table t(a int candidate key, b int);
+create or replace table s(a int, b int, candidate key (a, b));
+create or replace table t(a int primary key, b string determined by a);
 
+select a from t group by a;
+select a, b from s group by a, b;
+select a from t group by a;
+select a, b from s group by a, b;
+select a, b from t group by a, b;
+select a, count(*) from t group by a;  
+select a, max(b) from t group by a;   
 
-SELECT A FROM T GROUP BY A;
-SELECT A, B FROM S GROUP BY A, B;
-SELECT A FROM T GROUP BY A;
-SELECT A, B FROM S GROUP BY A, B;
-SELECT A, B FROM T GROUP BY A, B;
-SELECT a, COUNT(*) FROM t GROUP BY a;  -- a es PRIMARY KEY, cada grupo = 1 fila
-SELECT a, MAX(b) FROM t GROUP BY a;    -- innecesario: solo 1 fila por grupo
+select a, count(*) from u group by a;  -- sin restricciones, puede haber múltiples por grupo
+select a, max(b) from u group by a;    -- no hay garantía de unicidad
+select b, count(*) from t group by b;  -- b no es único, se justifica agrupar
+select c, sum(b) from u group by c;    -- agrupación válida
 
-SELECT a, COUNT(*) FROM u GROUP BY a;  -- sin restricciones, puede haber múltiples por grupo
-SELECT a, MAX(b) FROM u GROUP BY a;    -- no hay garantía de unicidad
-SELECT b, COUNT(*) FROM t GROUP BY b;  -- b no es único, se justifica agrupar
-SELECT c, SUM(b) FROM u GROUP BY c;    -- agrupación válida
+create or replace table t(a int primary key, b string determined by a, c int determined by b);
+select a, b from t group by a, b, c;
+
+create or replace table t(a int, b int determined by a);
+select a, b from t group by a, b;
+
+create or replace table t(a int primary key, b int)
+select a, b from t where a = b group by a, b;
+

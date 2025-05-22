@@ -1,16 +1,12 @@
-CREATE TABLE t (a INT, b INT, c INT); 
-CREATE TABLE s (a INT, b INT, c INT); 
-CREATE TABLE u (a INT, b INT); 
-CREATE TABLE v (a INT, b INT, c INT);
+create or replace table t (a int, b int, c int); 
+create or replace table s (a int, b int, c int); 
+create or replace table u (a int, b int); 
 
-SELECT * FROM t WHERE EXISTS (SELECT 1 FROM s GROUP BY b);
-SELECT * FROM t WHERE EXISTS (SELECT * FROM s WHERE s.a = t.a GROUP BY s.b);
-SELECT * FROM t WHERE EXISTS (SELECT 1 FROM s WHERE s.a = t.a GROUP BY s.c);
-SELECT * FROM t WHERE EXISTS (SELECT 1 FROM s WHERE s.b = t.b GROUP BY s.a);
-SELECT * FROM t WHERE EXISTS (SELECT 1 FROM s JOIN u ON u.a = s.a WHERE t.b = s.b GROUP BY s.a);
+select * from t where exists (select 1 from s group by b);
+select * from t where exists (select 1 from s where s.a = t.a group by s.b);
+select * from t where exists (select 1 from s where s.a = t.a group by s.c);
+select * from t where exists (select 1 from s where s.b = t.b group by s.a);
+select * from t where exists (select 1 from s join u on u.a = s.a where t.b = s.b group by s.a);
 
-SELECT * FROM t WHERE EXISTS (SELECT 1 FROM s WHERE s.a = t.a GROUP BY s.a HAVING COUNT(*) > 1);
-SELECT a, COUNT(*) FROM t GROUP BY a;
-
-
-
+select * from t where exists (select 1 from s where s.a = t.a group by s.a having count(*) > 1);
+select a, count(*) from t group by a;

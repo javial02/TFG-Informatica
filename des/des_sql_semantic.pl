@@ -1719,7 +1719,7 @@ check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout) :-
 
 check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
   extract_attributes(Cs, CsAttrs),
-  CsAttrs == [],    %%comprobamos que no hay ningun atributo en el select
+  CsAttrs \== [],    %%comprobamos que no hay ningun atributo en el select
   Group \== [],
   extract_attributes_from_equalities_in_cnf(Cond, Res),       
   check_if_group_by_in_k(Res, Group),                         
@@ -1745,11 +1745,10 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    create or replace table t(a int primary key, b string determined by a)
 %%    select a from t  group by a,b 
 %%    Positive example -> select a,b from t group by a,b 
-%%    create or replace table t(a int primary key, b string determined by a, c int determined by b)
+%%    create or replace table t(a int primary key, b int determined by a, c int determined by b)
 %%    select a from t group by c, a, b
 %%    select a from t where a = c group by c, a, b
-%%    select a from t group by a,b having b = 1
-%%    Positive example -> select a from t group by a,b having a = 1
+%%    Positive example -> select a from t group by a,b having b = 1
 
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
   extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
@@ -1813,7 +1812,7 @@ check_redundant_attributes_gby(C, Closure, K) :-
 
 check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(G),having(H),_O),_AS)):-
   G \== [],
-  H \== true,
+  H == true,
   extract_attributes(Cs, CsAttrs),                
   extract_attr_from_group_order_by(G, GAttrs),
   sort(CsAttrs, CsAttrsSort),
@@ -1847,8 +1846,6 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%  SQLCondition\==true,
 %% en vez de crear la consulta con una unica condicion en el where, despues de haber comprobado que el select y el froms on iguales, llamar a esta funcion con una and de ambos where
 
-%%!!!!!!!!!!!!!!!solo lo estoy haciendo para atributos en el cs
-%%!!!!!!!!!!!!!!arreglar renombramientos
 %%check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
 
 %% check_if_union_by_or((union(_A, SQLst1, SQLst2), _AS), Bss):-
@@ -1864,7 +1861,8 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%   sort(Rels1Names, Rels1NamesSorted),
 %%   sort(Rels2Names, Rels2NamesSorted),
 %%   Rels1NamesSorted == Rels2NamesSorted,
-%%   check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3)),
+%%   check_union_dlog(Bss, Bs),
+%%   check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3), Rs),
 %%   sql_semantic_error_warning(['UNION can be replaced by OR.']).
 %% check_if_union_by_or(_SQLst).
 
@@ -1884,7 +1882,7 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%   append(B1s, B2s, Bs).
 
 %% unify_tables([T|B1s], B2s):-
-%%   my_table(T),
+%%   my_table('$des',TableName,Arity),
 %%   unify_table_list(T,B2s).
 
 %% unify_table_list(T, [T | B2s]):-
@@ -1902,6 +1900,8 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %%    select a from t order by a, b
 %%    create or replace table t(a int primary key, b int)
 %%    select a from t order by a, b
+%%    create or replace table t(a int candidate key, b int)
+%%    select a from t order by a, b
 
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
@@ -1917,6 +1917,7 @@ all_edges([], K, K).
 
 all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
 
+  % 1. Aristas por dependencias funcionales
   findall(edge(attr(Rel, A1, _), attr(Rel, B1, _)), (
       my_functional_dependency('$des', Rname, As, Bs),
       complete_attr(Rel, As, Ass),
@@ -1925,7 +1926,7 @@ all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
       member(attr(Rel, B1, _), Bss)
   ), RawEdges),
 
-  
+  % 2. Aristas por claves primarias
   findall(edge(KAttr, AAttr), (
       my_primary_key('$des', Rname, KeyAtts),
       complete_attr(Rel, KeyAtts, CKAtts),
@@ -1935,15 +1936,26 @@ all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
       member(AAttr, NonKeyAttrs)
   ), PKEdges),
 
-  
-  append(RawEdges, PKEdges, AllRawEdges),
+  % 3. Aristas por claves candidatas
+  findall(edge(CKAttr, AAttr), (
+      my_candidate_key('$des', Rname, CandKeyAtts),
+      complete_attr(Rel, CandKeyAtts, CCandKeyAtts),
+      member(CKAttr, CCandKeyAtts),
+      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
+      exclude(attr_in_list(CCandKeyAtts), AllAttrs, NonKeyAttrs),
+      member(AAttr, NonKeyAttrs)
+  ), CKEdges),
+
+  % 4. Unión y continuación
+  append(RawEdges, PKEdges, TmpEdges),
+  append(TmpEdges, CKEdges, AllRawEdges),
   sort(AllRawEdges, AllEdgesSorted),
   merge_edges(AllEdgesSorted, Kin, EdgesMid),
   all_edges(Rels, EdgesMid, Edges).
 
-
 attr_in_list(CKAtts, attr(_, Name, _)) :-
     member(attr(_, Name, _), CKAtts).
+
 
 
 merge_edges(X, Y, Z) :-

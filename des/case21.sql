@@ -1,32 +1,15 @@
--- Crear tabla j
-CREATE TABLE j(a INT, b INT);
+create table j(a int, b int);
+select a from j where a = b group by a, b;
 
--- Ejemplo inválido
-SELECT a FROM j WHERE a = b GROUP BY a, b;
+select a from j where a = b group by a, b having b = 1;
 
--- Ejemplo positivo
-SELECT a FROM j WHERE a = b GROUP BY a, b HAVING b = 1;
+create or replace table t(a int primary key, b string determined by a);
+select a from t group by a, b;
 
--- Crear tabla t con dependencia funcional b determinado por a
-CREATE OR REPLACE TABLE t(a INT PRIMARY KEY, b STRING DETERMINED BY a);
+select a, b from t group by a, b;
 
--- Ejemplo inválido
-SELECT a FROM t GROUP BY a, b;
+create or replace table t(a int primary key, b int determined by a, c int determined by b);
+select a from t group by c, a, b;
+select a from t where a = c group by c, a, b;
 
--- Ejemplo positivo
-SELECT a, b FROM t GROUP BY a, b;
-
--- Crear tabla t con dependencias funcionales encadenadas
-CREATE OR REPLACE TABLE t(a INT PRIMARY KEY, b STRING DETERMINED BY a, c INT DETERMINED BY b);
-
--- Caso 1
-SELECT a FROM t GROUP BY c, a, b;
-
--- Caso 2
-SELECT a FROM t WHERE a = c GROUP BY c, a, b;
-
--- Caso 3
-SELECT a FROM t GROUP BY a, b HAVING b = 1;
-
--- Ejemplo positivo
-SELECT a FROM t GROUP BY a, b HAVING a = 1;
+select a from t group by a, b having b = 1;
