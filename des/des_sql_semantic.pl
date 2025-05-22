@@ -1658,14 +1658,14 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS), Closure):-
   G \== [],
-  extract_pks_and_ck_from_gby(Rels, G, [], K), 
-  extract_attr_from_group_order_by(G, GAttrs), 
-  sort(K, KSorted),
-  sort(GAttrs, GAttrsSorted),
   extract_fds_from_relations(Rels,[], Edges),
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
+  extract_pks_and_ck_from_gby(Rels, G, [], K), 
+  extract_attr_from_group_order_by(G, GAttrs), 
+  sort(K, KSorted),
+  sort(GAttrs, GAttrsSorted),
   ((member_chck_attr(KSorted, GAttrsSorted), member_chck_attr(GAttrsSorted, KSorted)) 
   -> 
   sql_semantic_error_warning(['GROUP BY with singleton groups.'])
@@ -1676,7 +1676,11 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(
     sql_semantic_error_warning(['GROUP BY with singleton groups.']);
     true)))
     .
-check_group_by_with_singleton_groups(_SQLst,_Closure).
+check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by([]),_H,_O),_AS), Closure):-
+  extract_fds_from_relations(Rels,[], Edges),
+  add4(Cond, Edges, Edges2),
+  sort(Edges2, EdgesSorted),
+  transitive_closure(EdgesSorted, Closure).
 
 % To extract PKs, CKs
 extract_pks_and_ck_from_gby([], _, K, K).
