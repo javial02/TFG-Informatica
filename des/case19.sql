@@ -12,10 +12,10 @@ select a, b from t group by a, b;
 select a, count(*) from t group by a;  
 select a, max(b) from t group by a;   
 
-select a, count(*) from u group by a;  -- sin restricciones, puede haber múltiples por grupo
-select a, max(b) from u group by a;    -- no hay garantía de unicidad
-select b, count(*) from t group by b;  -- b no es único, se justifica agrupar
-select c, sum(b) from u group by c;    -- agrupación válida
+select a, count(*) from u group by a;  
+select a, max(b) from u group by a;    
+select b, count(*) from t group by b;  
+select c, sum(b) from u group by c;    
 
 create or replace table t(a int primary key, b string determined by a, c int determined by b);
 select a, b from t group by a, b, c;
