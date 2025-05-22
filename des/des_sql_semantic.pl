@@ -1473,7 +1473,7 @@ sql_semantic_error_warning(Message) :-
 %%      
 check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS)) :-
   D == 'distinct',
-  extract_attributes(Cs, X),
+  extract_attributes(Cs, Rels,X),
   sort(X, Xnueva),
   extract_attributes_from_equalities_in_cnf(Cond, Res),
   merge_lists(Xnueva, Res, X2), 
@@ -1486,10 +1486,21 @@ check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by
   sql_semantic_error_warning(['Using unnecesary DISTINCT.']).
 check_sql_unnec_distinct(_SQLst).
 
-%% Extract attributes from SELECT clause
-extract_attributes([],[]).
-extract_attributes([expr(attr(Rel, Name, Id), _, _)|Cs], [attr(Rel, Name, Id)|As]):-
-  extract_attributes(Cs, As).  
+%% Extract attributes from SELECT clause, handling '*' as all attributes
+extract_attributes('*', Rels, AllAttrs) :-
+    findall(attr(Rel, A, T), (
+        member((Rname, [Rel|_]), Rels),
+        my_attribute('$des', _, Rname, A, T)
+    ), AllAttrs).
+
+extract_attributes([], _, []).
+
+extract_attributes([expr(attr(Rel, Name, Id), _, _)|Cs], Rels, [attr(Rel, Name, Id)|As]) :-
+    extract_attributes(Cs, Rels, As).
+
+extract_attributes([_|Cs], Rels, As) :-
+    extract_attributes(Cs, Rels, As).
+
   
 %% Extract attributes from constant equalities
 get_attr_from_cte_equality(attr(Rel, Name, Id)=cte(_, _), attr(Rel, Name, Id)).
@@ -1654,7 +1665,7 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(
   ((member_chck_attr(KSorted, GAttrsSorted), member_chck_attr(GAttrsSorted, KSorted)) 
   -> 
   sql_semantic_error_warning(['GROUP BY with singleton groups.'])
-  ;(all_edges(Rels,[], Edges),
+  ;(extract_fds_from_relations(Rels,[], Edges),
     add4(Cond, Edges, Edges2),
     transitive_closure(Edges2, Closure),
     check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout),
@@ -1717,9 +1728,9 @@ check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout) :-
 %%     select a from t where a = (select b from t) group by a
 %%     select a from t where a = 3 group by a
 
-check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,_F,where(Cond),group_by(Group),_H,_O),_AS)):-
-  extract_attributes(Cs, CsAttrs),
-  CsAttrs \== [],    %%comprobamos que no hay ningun atributo en el select
+check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),_H,_O),_AS)):-
+  extract_attributes(Cs,Rels, CsAttrs),
+  CsAttrs == [],    %%comprobamos que no hay ningun atributo en el select
   Group \== [],
   extract_attributes_from_equalities_in_cnf(Cond, Res),       
   check_if_group_by_in_k(Res, Group),                         
@@ -1751,12 +1762,12 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 %%    Positive example -> select a from t group by a,b having b = 1
 
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),having(Having),_O),_AS)):-
-  extract_attributes(Cs, Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
+  extract_attributes(Cs, Rels,Kselect),      %%guardamos los atributos que hay en el select en el conjunto Kselect
   add2(Having, [], Khave),            %%guardamos en una lista Khave todos los atributos que aparecen en la clausula having
   merge_lists(Kselect, Khave, K),    %%juntamos los atributos que aparecen en select y en have
 
   extract_attr_from_group_order_by(Group, GAttrs),
-  all_edges(Rels,[], Edges),
+  extract_fds_from_relations(Rels,[], Edges),
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
@@ -1810,10 +1821,10 @@ check_redundant_attributes_gby(C, Closure, K) :-
 %%    create table s(a int, b int)
 %%    select a,b from s group by a,b   
 
-check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,_F,_W,group_by(G),having(H),_O),_AS)):-
+check_if_distinct_intead_of_groub_by((select(_D,_T,_Of,Cs,_TL,from(Rels),_W,group_by(G),having(H),_O),_AS)):-
   G \== [],
   H == true,
-  extract_attributes(Cs, CsAttrs),                
+  extract_attributes(Cs, Rels,CsAttrs),                
   extract_attr_from_group_order_by(G, GAttrs),
   sort(CsAttrs, CsAttrsSort),
   sort(GAttrs, GAttrsSort),
@@ -1851,8 +1862,8 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 %% check_if_union_by_or((union(_A, SQLst1, SQLst2), _AS), Bss):-
 %%   SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
 %%   SQLst2 = (select(_D2,_T2,_Of2,Cs2,_TL2,from(Rels2),where(Cond2),_G2,_H2,_O2),_AS2),
-%%   extract_attributes(Cs1, Cs1Attrs),
-%%   extract_attributes(Cs2, Cs2Attrs),
+%%   extract_attributes(Cs1, Rels1,Cs1Attrs),
+%%   extract_attributes(Cs2,Rels2,Cs2Attrs),
 %%   sort(Cs1Attrs, Cs1Sorted),
 %%   sort(Cs2Attrs, Cs2Sorted),
 %%   equal_attr_name(Cs1Sorted, Cs2Sorted),
@@ -1906,16 +1917,16 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),_G,_H,order_by(O,_N)),_AS)):-
   extract_attr_from_group_order_by(O, OAttrs),
-  all_edges(Rels, [], Edges),
+  extract_fds_from_relations(Rels, [], Edges),
   add4(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
   check_redundant_attributes(OAttrs, Closure).
 check_if_ord_by_is_unnec(_SQLst).
 
-all_edges([], K, K).
+extract_fds_from_relations([], K, K).
 
-all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
+extract_fds_from_relations([(Rname, [Rel|_])|Rels], Kin, Edges) :-
 
   % 1. Aristas por dependencias funcionales
   findall(edge(attr(Rel, A1, _), attr(Rel, B1, _)), (
@@ -1951,7 +1962,7 @@ all_edges([(Rname, [Rel|_])|Rels], Kin, Edges) :-
   append(TmpEdges, CKEdges, AllRawEdges),
   sort(AllRawEdges, AllEdgesSorted),
   merge_edges(AllEdgesSorted, Kin, EdgesMid),
-  all_edges(Rels, EdgesMid, Edges).
+  extract_fds_from_relations(Rels, EdgesMid, Edges).
 
 attr_in_list(CKAtts, attr(_, Name, _)) :-
     member(attr(_, Name, _), CKAtts).
