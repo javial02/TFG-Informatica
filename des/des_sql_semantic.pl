@@ -1989,7 +1989,7 @@ add4(_, K,K).
 %%   sort(Rels2Names, Rels2NamesSorted),
 %%   Rels1NamesSorted == Rels2NamesSorted,
 %%   check_union_dlog(Bss, Bs),
-%%   check_sql_tautological_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3), Rs),
+%%   check_sql_null_tautological_inconsistent_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3), Rs),
 %%   sql_semantic_error_warning(['UNION can be replaced by OR.']).
 %% check_if_union_by_or(_SQLst).
 
