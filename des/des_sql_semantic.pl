@@ -736,7 +736,6 @@ bind_keys_and_consequents([_|FDs],Vs) :-
   bind_keys_and_consequents(FDs,Vs).
 
 
-%% ENTENDIDO!
 %% Error 3: Constant output column
 %%          Warn if a column becomes trivially constant when it is not projected as such
 %%   Examples:
@@ -766,7 +765,7 @@ check_sql_constant_column_list([Arg|Args],Rel,[C|Cs]) :-
 check_sql_constant_column_list([_Arg|Args],Rel,[_C|Cs]) :-
   check_sql_constant_column_list(Args,Rel,Cs).
 
-%% ENTENDIDO! 
+
 %% Error 4: Duplicated column values
 %%          Warn if two columns refer to the same expression
 %%   Examples:
@@ -792,7 +791,7 @@ check_sql_duplicated_column_values((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),_AS
 check_sql_duplicated_column_values(_SQLst,_Rs).
   
 
-%% ENTENDIDO!
+
 %% Error 5: Unused tuple variable. Top 5
 %%          An unaccessed single relation in the FROM list from the root query (Error 27 captures all other cases)
 %%   Examples:
@@ -875,7 +874,7 @@ relation_in_goals([_G|Gs],Rel,RG) :-
   relation_in_goals(Gs,Rel,RG).
 
 
-%% ENTENDIDO!
+
 %% Error 7: Tuple variables are always identical.
 %%          Processed before unfold_rules in cra_to_dl.
 %%   Examples:
@@ -1053,7 +1052,7 @@ table_column_var_source_goals(V,[_G|Gs],TableColumn) :-
   table_column_var_source_goals(V,Gs,TableColumn).
 
 
-%% ENTENDIDO!
+
 %% Error 9: Comparison with NULL.
 %%   Examples:
 %%     create or replace table t(a string)
@@ -1070,7 +1069,7 @@ check_sql_null_comparison(SQLst) :-
   sql_semantic_error_warning(['Null comparison in: "','$exec'(write_sql_cond(G,0,'$des')),'". Consider using IS ',NOT,'NULL instead.']).
 check_sql_null_comparison(_SQLst).
   
-%% ENTENDIDO!
+
 %% Error 11: Unnecessary general comparison operator.
 %%           Warn if:
 %%             - LIKE '%' occurs, which is equivalent to IS NOT NULL
@@ -1099,7 +1098,7 @@ check_sql_general_comparison(SQLst) :-
 check_sql_general_comparison(_SQLst).
 
 
-%% ENTENDIDO!
+
 %% Error 12: LIKE without wildcards.
 %%   Examples:
 %%     create or replace table t(a string)
@@ -1141,7 +1140,7 @@ escape_characters_from_expr(_,[]) :-
   !.
 
 
-%% ENTENDIDO!  
+ 
 %% Error 13: Unnecessarily complicated SELECT in EXISTS-subquery.
 %%   Examples:
 %%     create or replace table t(a int, b int)
@@ -1418,7 +1417,7 @@ uncorrelated_relations([(G,Vs)|GVss],LVs,RRels) :-
     uncorrelated_relations(GVss,LLVs,RRels)).
   
 
-%% ENTENDIDO!
+
 %% Error 32: Strange HAVING.
 %%           Warn if a SELECT with HAVING does not include a GROUP BY.
 %%           Such a statement returns zero o a single tuple.
@@ -1435,7 +1434,7 @@ check_sql_having_wo_group_by((SQLst,_AS)) :-
 check_sql_having_wo_group_by(_SQLst).
 
 
-%% ENTENDIDO!
+
 %% Error 33: SUM(DISTINCT ...) or AVG(DISTINCT ...) 
 %%           Warn if duplicate elimination is included for the argument of either SUM or AVG.
 %%           If included, this might not be an error, but it is suspicious because usually duplicates are relevant for these aggregates
@@ -1743,12 +1742,14 @@ check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout) :-
 
 check_group_by_only_with_one_group((select(_D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by(Group),_H,_O),_AS)):-
   extract_attributes(Cs,Rels, CsAttrs),
-  CsAttrs == [],  
-  Group \== [],
-  extract_attributes_from_equalities_in_cnf(Cond, Res),       
-  check_if_group_by_in_k(Res, Group),                         
-  !,
-  sql_semantic_error_warning(['GROUP BY with only a single group.']).
+  ( CsAttrs == []
+    -> Group \== [],
+       extract_attributes_from_equalities_in_cnf(Cond, Res),
+       check_if_group_by_in_k(Res, Group),
+       !,
+       sql_semantic_error_warning(['GROUP BY with only a single group.'])
+    ; true
+    ).
 check_group_by_only_with_one_group(_SQLst).
 
 % new options for extract_attributes_from_equalities_in_cnf
@@ -1837,12 +1838,12 @@ check_if_distinct_intead_of_groub_by((select(D,_T,_Of,Cs,_TL,from(Rels),_W,group
   sql_semantic_error_warning(['GROUP BY can be replaced by DISTINCT.']).
 check_if_distinct_intead_of_groub_by(_SQLst).
 
-%Auxiliar predicate to extract attributes from Group By clause
+% Auxiliar predicate to extract attributes from Group By clause
 extract_attr_from_group_order_by([], []).
 extract_attr_from_group_order_by([expr(attr(Rel,Name,_),_,_) | Gs], [attr(Rel,Name,_) | GAttrs]):-
   extract_attr_from_group_order_by(Gs, GAttrs).
 
-%Check that two attributes are equal
+% Check that two attributes are equal
 equal_attr([], []).
 equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
     Rel1 == Rel2,
