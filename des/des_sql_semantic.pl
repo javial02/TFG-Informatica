@@ -156,7 +156,7 @@ check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
   check_if_distinct_intead_of_groub_by(SQLst),            % Error 22
   check_group_by_with_singleton_groups(SQLst,Closure),    % Error 19
   check_group_by_only_with_one_group(SQLst),              % Error 20
-  check_if_attr_grp_by_is_unnec(SQLst,Closure),                   % Error 21
+  check_if_attr_grp_by_is_unnec(SQLst,Closure),           % Error 21
   %%check_if_union_by_or(SQLst, Bss),                     % Error 23
   check_if_ord_by_is_unnec(SQLst,Closure).                % Error 24
   
