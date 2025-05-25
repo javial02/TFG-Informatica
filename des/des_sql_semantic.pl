@@ -130,7 +130,6 @@ check_sql_semantic_error((with(_SQLst,_SQLsts),_AS),_RNVss,_ARs). % Warning: TOD
   
 
 check_sql_select_semantic_error(SQLst,RNVss,ARs) :-
-  %% añadir el calculo del cierre transitivo
   ruleNVs_to_rule_NVs_list(RNVss,Rs,NVss),
   rule_head_body_goals_list(Rs,Hs,Bss),
   check_sql_inconsistent_condition(Rs,ARs),               % Error  1
@@ -747,7 +746,7 @@ bind_keys_and_consequents([_|FDs],Vs) :-
 
 check_sql_constant_column((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),[Rel|_]),[R|_Rs]) :-
   check_sql_constant_column(on),
-  rule_head(R,H),   %% extrae la cabeza de la regla
+  rule_head(R,H),   
   H=..[_|Args],
   check_sql_constant_column_list(Args,Rel,Cs),
   !.
@@ -778,7 +777,7 @@ check_sql_constant_column_list([_Arg|Args],Rel,[_C|Cs]) :-
 check_sql_duplicated_column_values((select(_AD,_T,_Of,Cs,_TL,_F,_W,_G,_H,_O),_AS),[R|_Rs]) :-
   Cs\=='*',      % Do not warn if retrieving all columns with '*'
   check_sql_duplicated_column_values(on),
-  rule_head(R,H), %%extrae la cabeza de la regla de datalog
+  rule_head(R,H), 
   H=..[_|Args],
   extract_duplicates_var(Args,DVars),
   (DVars==[]
@@ -891,14 +890,14 @@ check_sql_identical_tuples(_Lang,Rs) :-
   
 check_sql_identical_tuples([]).
 check_sql_identical_tuples([R|Rs]) :-
-  rule_body(R,B),   %%guarda en B el cuerpo de la regla de Datalog
-  my_list_to_tuple(Bs,B),   %%guarda B en forma de lista
+  rule_body(R,B),   
+  my_list_to_tuple(Bs,B),   
   check_sql_identical_tuples_goal_list(Bs),
   check_sql_identical_tuples(Rs).
 
 check_sql_identical_tuples_goal_list([_B]).
 check_sql_identical_tuples_goal_list([B|Bs]) :-
-  my_member_var(B,Bs),    %%comprueba si B esta (repetido) en Bs
+  my_member_var(B,Bs),    
   B=..[Rel|Args],   
   length(Args,L),
   user_predicate(Rel/L),
@@ -1428,7 +1427,7 @@ uncorrelated_relations([(G,Vs)|GVss],LVs,RRels) :-
 
 check_sql_having_wo_group_by((SQLst,_AS)) :-
   my_member_term(select(_AD,_T,_Of,_P,_TL,_F,_W,group_by([]),having(H),_O),SQLst),
-  H\==true,   %% clausula HAVING no vacía
+  H\==true,   
   !,
   sql_semantic_error_warning(['Found a HAVING clause with condition "','$exec'(write_sql_cond(H,0,'$des')),'" without a GROUP BY clause.']).
 check_sql_having_wo_group_by(_SQLst).
@@ -1488,7 +1487,7 @@ check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by
     ;
     check_if_group_by_in_k(X3, G)),
   !,
-  sql_semantic_error_warning(['Using unnecesary DISTINCT.']).
+  sql_semantic_error_warning(['Using unnecessary DISTINCT.']).
 check_sql_unnec_distinct(_SQLst).
 
 %% Extract attributes from SELECT clause, handling '*' as all attributes
