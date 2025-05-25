@@ -1806,28 +1806,33 @@ add2(_, Kin, Kin).
 
 check_redundant_attributes_gby(C, Closure, K) :-
   forall((member(C1, C) , C1 = attr(_, Name,_), \+ member_chck_attr([C1], K)),
-      (   findall(C2,
-              (   member(edge(C2, C1), Closure),
-                  C2 \= C1,
-                  member(C2, C)
-              ),
-              C2List),
-          (   C2List \= []
-          ->  sql_semantic_error_warning(['Unnecessary GROUP BY term "',Name,'".'])
-          ;   true
-          )
-      )).
+    ( findall(C2,
+        ( member(edge(C2, C1), Closure),
+          C2 \= C1,
+          member(C2, C)
+        ),
+        C2List),
+      ( C2List \= []
+      ->  sql_semantic_error_warning(['Unnecessary GROUP BY term "',Name,'".'])
+      ;   true
+      )
+    )).
 
 
 %% Error 22: GROUP BY can be replaced by DISTINCT
 %%   Examples:
 %%    create table s(a int, b int)
 %%    select a,b from s group by a,b   
+%%    Positive examples ->
+%%    select a, count(*) from t group by a;
+%%    select a, count(*) from t group by a;
 
 check_if_distinct_intead_of_groub_by((select(D,_T,_Of,Cs,_TL,from(Rels),_W,group_by(G),having(H),_O),_AS)):-
   D \== 'distinct',
   G \== [],
   H == true,
+  check_no_aggr_func_in_cs(Cs, [], Kout),
+  Kout == [],
   extract_attributes(Cs, Rels,CsAttrs),                
   extract_attr_from_group_order_by(G, GAttrs),
   sort(CsAttrs, CsAttrsSort),
@@ -1849,6 +1854,25 @@ equal_attr([attr(Rel1,Name1,_)|Atts1], [attr(Rel2,Name2,_)|Atts2]) :-
     Name1 == Name2,
     equal_attr(Atts1, Atts2).
 
+check_no_aggr_func_in_cs([], K, K).
+check_no_aggr_func_in_cs([C| Cs], Kin, Kout):-
+  (check_if_aggr_func(C) 
+  -> Kmid = [C|Kin]
+  ; 
+  Kmid = Kin),
+  check_no_aggr_func_in_cs(Cs, Kmid, Kout).
+
+
+check_if_aggr_func(expr('count',_,_)).
+check_if_aggr_func(expr('avg',_,_)).
+check_if_aggr_func(expr('sum',_,_)).
+check_if_aggr_func(expr('min',_,_)).
+check_if_aggr_func(expr('max',_,_)).
+check_if_aggr_func(expr(count(_),_,_)).
+check_if_aggr_func(expr(avg(_),_,_)).
+check_if_aggr_func(expr(sum(_),_,_)).
+check_if_aggr_func(expr(min(_),_,_)).
+check_if_aggr_func(expr(max(_),_,_)).
   
 
 %% ERROR 24:
@@ -1951,7 +1975,7 @@ check_redundant_attributes(C, Closure) :-
           )
       )).
 
-
+% Add for A=B
 add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
   Kmid = [edge(attr(Rel2,Name2,Id2), attr(Rel1,Name1,Id1)) | Kin],
   Kout = [edge(attr(Rel1,Name1,Id1), attr(Rel2,Name2,Id2)) | Kmid].
@@ -1967,12 +1991,6 @@ add4(_, K,K).
 %% Error 23: UNION can be replace by OR
 %%     Examples: 
 %%      (select * from t) union (select * from t);
-
-%%Hay que usar esta funcion: check_sql_tautological_condition(PSQLst) :-
-%%PSQLst=(select(Distinct,Top,Offset,PList,TList,From,where(SQLCondition),GroupBy,Having,OrderBy),Schema), % Check, for now, this kind of select statements
-%%  SQLCondition\==true,
-%% en vez de crear la consulta con una unica condicion en el where, despues de haber comprobado que el select y el froms on iguales, llamar a esta funcion con una and de ambos where
-
 %%check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
 
 %% check_if_union_by_or((union(_A, SQLst1, SQLst2), _AS), Bss):-
@@ -2009,7 +2027,7 @@ add4(_, K,K).
 %%   append(B1s, B2s, Bs).
 
 %% unify_tables([T|B1s], B2s):-
-%%   my_table('$des',TableName,Arity),
+%%   my_table('$des',T,_),
 %%   unify_table_list(T,B2s).
 
 %% unify_table_list(T, [T | B2s]):-
