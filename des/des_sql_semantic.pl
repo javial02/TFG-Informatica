@@ -954,6 +954,7 @@ check_sql_tautological_condition(Condition,Rs,ARs,ExpandCtrs) :-
   ),
   !.
   
+
 %% Error 8: Inconsistent / Implied or tautological condition over IS [NOT] NULL comparison.
 %% Examples : create table department (deptno char(3) primary key, deptname varchar(36) not null); 
 %%            create table employee (empno char(6) primary key, firstname varchar(12), lastname varchar(15) not null, workdept char(3), foreign key (workdept) references department(deptno));
