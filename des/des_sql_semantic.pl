@@ -1713,7 +1713,7 @@ extract_pks_and_ck_from_gby([(Rname, [Rel | _]) | Rels], Group, Kini, KFinal):-
   extract_pks_and_ck_from_gby(Rels, Group, Kmid1, KFinal).
 
 check_if_is_pk(_,_, [], Pks, Pks).
-check_if_is_pk(Rel,Atts, [expr(attr(Rel,Name,_),_,_) | Gps], Pks, PksFinal):-
+check_if_is_pk(Rel,Atts, [expr(attr(_,Name,_),_,_) | Gps], Pks, PksFinal):-
   (memberchk(attr(Rel,Name,_), Atts)
     -> Pkmid = [attr(Rel,Name,_)| Pks]
     ; Pkmid = Pks),
