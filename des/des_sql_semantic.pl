@@ -1464,6 +1464,7 @@ sql_semantic_error_warning(Message) :-
   write_warning_log(['[Sem] '|ContMessage]).
 
 
+
 %% Javier Amado Lázaro starts from here
 
 %% Error 2: Unnecesary DISTINCT
@@ -1689,6 +1690,7 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(
     -> 
     sql_semantic_error_warning(['GROUP BY with singleton groups.']);
     true))).
+
 % To save transitive closure for next errors
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by([]),_H,_O),_AS), Closure):-
   extract_fds_from_relations(Rels,[], Edges),
@@ -1736,6 +1738,84 @@ check_redundant_attributes_pk(GAttrsSorted, KSorted, Closure, Kout) :-
             member(edge(K, G), Closure)                       
         ),
         Kout).
+
+extract_fds_from_relations([], K, K).
+
+extract_fds_from_relations([(Rname, [Rel|_])|Rels], Kin, Edges) :-
+
+  findall(edge(attr(Rel, A1, _), attr(Rel, B1, _)), (
+      my_functional_dependency('$des', Rname, As, Bs),
+      complete_attr(Rel, As, Ass),
+      complete_attr(Rel, Bs, Bss),
+      member(attr(Rel, A1, _), Ass),
+      member(attr(Rel, B1, _), Bss)
+  ), RawEdges),
+
+  findall(edge(KAttr, AAttr), (
+      my_primary_key('$des', Rname, KeyAtts),
+      complete_attr(Rel, KeyAtts, CKAtts),
+      member(KAttr, CKAtts),
+      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
+      exclude(attr_in_list(CKAtts), AllAttrs, NonKeyAttrs),
+      member(AAttr, NonKeyAttrs)
+  ), PKEdges),
+
+  findall(edge(CKAttr, AAttr), (
+      my_candidate_key('$des', Rname, CandKeyAtts),
+      complete_attr(Rel, CandKeyAtts, CCandKeyAtts),
+      member(CKAttr, CCandKeyAtts),
+      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
+      exclude(attr_in_list(CCandKeyAtts), AllAttrs, NonKeyAttrs),
+      member(AAttr, NonKeyAttrs)
+  ), CKEdges),
+
+  append(RawEdges, PKEdges, TmpEdges),
+  append(TmpEdges, CKEdges, AllRawEdges),
+  sort(AllRawEdges, AllEdgesSorted),
+  merge_edges(AllEdgesSorted, Kin, EdgesMid),
+  extract_fds_from_relations(Rels, EdgesMid, Edges).
+
+attr_in_list(CKAtts, attr(_, Name, _)) :-
+    member(attr(_, Name, _), CKAtts).
+
+
+
+merge_edges(X, Y, Z) :-
+  append(X, Y, Aux),
+  sort(Aux, Z).
+
+
+transitive_closure(Edges, Closure) :-
+  closure_step(Edges, Edges, Closure).
+
+closure_step(_, Current, Current) :-
+  \+ ( member(edge(X, Y), Current),
+        member(edge(Y, Z), Current),
+        \+ member(edge(X, Z), Current),
+        X \= Z
+      ).
+
+closure_step(_, Current, Closure) :-
+  findall(edge(X, Z),
+      (   member(edge(X, Y), Current),
+          member(edge(Y, Z), Current),
+          \+ member(edge(X, Z), Current),
+          X \= Z
+      ),
+      NewEdges),
+  append(Current, NewEdges, Combined),
+  sort(Combined, Next),
+  closure_step(_, Next, Closure).
+
+% Add for A=B
+add_edges_from_equalities(and(C1, C2), Kin, Kout) :-
+    add_edges_from_equalities(C1, Kin, Kmid),
+    add_edges_from_equalities(C2, Kmid, Kout).
+
+add_edges_from_equalities(attr(R1, N1, I1) = attr(R2, N2, I2), Kin, [edge(attr(R1, N1, I1), attr(R2, N2, I2)),edge(attr(R2, N2, I2), attr(R1, N1, I1)) | Kin]).
+
+add_edges_from_equalities(_, K, K).
+
 
 
 %% Error 20: GROUP BY with only a single group
@@ -1791,8 +1871,6 @@ check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),_W,group_by(Gr
   extract_attr_from_group_order_by(Group, GAttrs),
   check_redundant_attributes_gby(GAttrs, Closure, K). 
 check_if_attr_grp_by_is_unnec(_SQLst, _Closure).
-
-
 
 check_redundant_attributes_gby(C, Closure, K) :-
   forall((member(C1, C) , C1 = attr(_, Name,_), \+ member_chck_attr([C1], K)),
@@ -1879,79 +1957,10 @@ check_if_aggr_func(expr(max(_),_,_)).
 
 check_if_ord_by_is_unnec((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,order_by(O,_N)),_AS), Closure):-
   extract_attr_from_group_order_by(O, OAttrs),
-  check_redundant_attributes(OAttrs, Closure).
+  check_redundant_attributes_oby(OAttrs, Closure).
 check_if_ord_by_is_unnec(_SQLst, _Closure).
 
-extract_fds_from_relations([], K, K).
-
-extract_fds_from_relations([(Rname, [Rel|_])|Rels], Kin, Edges) :-
-
-  findall(edge(attr(Rel, A1, _), attr(Rel, B1, _)), (
-      my_functional_dependency('$des', Rname, As, Bs),
-      complete_attr(Rel, As, Ass),
-      complete_attr(Rel, Bs, Bss),
-      member(attr(Rel, A1, _), Ass),
-      member(attr(Rel, B1, _), Bss)
-  ), RawEdges),
-
-  findall(edge(KAttr, AAttr), (
-      my_primary_key('$des', Rname, KeyAtts),
-      complete_attr(Rel, KeyAtts, CKAtts),
-      member(KAttr, CKAtts),
-      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
-      exclude(attr_in_list(CKAtts), AllAttrs, NonKeyAttrs),
-      member(AAttr, NonKeyAttrs)
-  ), PKEdges),
-
-  findall(edge(CKAttr, AAttr), (
-      my_candidate_key('$des', Rname, CandKeyAtts),
-      complete_attr(Rel, CandKeyAtts, CCandKeyAtts),
-      member(CKAttr, CCandKeyAtts),
-      findall(attr(Rel, A, _), my_attribute('$des', _, Rname, A, _), AllAttrs),
-      exclude(attr_in_list(CCandKeyAtts), AllAttrs, NonKeyAttrs),
-      member(AAttr, NonKeyAttrs)
-  ), CKEdges),
-
-  append(RawEdges, PKEdges, TmpEdges),
-  append(TmpEdges, CKEdges, AllRawEdges),
-  sort(AllRawEdges, AllEdgesSorted),
-  merge_edges(AllEdgesSorted, Kin, EdgesMid),
-  extract_fds_from_relations(Rels, EdgesMid, Edges).
-
-attr_in_list(CKAtts, attr(_, Name, _)) :-
-    member(attr(_, Name, _), CKAtts).
-
-
-
-merge_edges(X, Y, Z) :-
-  append(X, Y, Aux),
-  sort(Aux, Z).
-
-
-transitive_closure(Edges, Closure) :-
-  closure_step(Edges, Edges, Closure).
-
-closure_step(_, Current, Current) :-
-  \+ ( member(edge(X, Y), Current),
-        member(edge(Y, Z), Current),
-        \+ member(edge(X, Z), Current),
-        X \= Z
-      ).
-
-closure_step(_, Current, Closure) :-
-  findall(edge(X, Z),
-      (   member(edge(X, Y), Current),
-          member(edge(Y, Z), Current),
-          \+ member(edge(X, Z), Current),
-          X \= Z
-      ),
-      NewEdges),
-  append(Current, NewEdges, Combined),
-  sort(Combined, Next),
-  closure_step(_, Next, Closure).
-
-
-check_redundant_attributes(C, Closure) :-
+check_redundant_attributes_oby(C, Closure) :-
   forall((member(C1, C) , C1 = attr(_, Name,_)),
       (   findall(C2,
               (   member(edge(C2, C1), Closure),
@@ -1964,17 +1973,6 @@ check_redundant_attributes(C, Closure) :-
           ;   true
           )
       )).
-
-% Add for A=B
-add_edges_from_equalities(and(C1, C2), Kin, Kout) :-
-    add_edges_from_equalities(C1, Kin, Kmid),
-    add_edges_from_equalities(C2, Kmid, Kout).
-
-add_edges_from_equalities(attr(R1, N1, I1) = attr(R2, N2, I2), Kin, [edge(attr(R1, N1, I1), attr(R2, N2, I2)),edge(attr(R2, N2, I2), attr(R1, N1, I1)) | Kin]).
-
-add_edges_from_equalities(_, K, K).
-
-
 
 
 
