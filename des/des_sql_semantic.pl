@@ -1550,22 +1550,32 @@ remove_attr_duplicates([attr(R, N, T)|Rest], Acc, Kout) :-
  
 
 %% Add A=B attr to K
-add(attr(Rel1,Name1,_) = attr(Rel2,Name2,_), Kin, Kout):-
-  (memberchk(attr(Rel1,Name1,_), Kin),
-  \+ memberchk(attr(Rel2,Name2,_), Kin) 
-  -> Kin1 = [attr(Rel2,Name2,_)|Kin]
-  ;  Kin1 = Kin ),
-  (Kin == Kin1 ,
-  memberchk(attr(Rel2,Name2,_), Kin1),
-  \+ memberchk(attr(Rel1,Name1,_), Kin1) 
-  -> Kout = [attr(Rel1,Name1,_)|Kin1]
-  ;  Kout = Kin1).
-         
-add(and(C1,C2), Kin, Kout):-
-  add(C1, Kin, Kin1),
-  add(C2, Kin1, Kout).
+add_attr_propagation(and(C1, C2), Kin, Kout) :-
+    add_attr_propagation(C1, Kin, Kmid),
+    add_attr_propagation(C2, Kmid, Kout).
 
-add(_, Kin, Kin).
+add_attr_propagation(attr(R1, N1, _) = attr(R2, N2, _), Kin, Kout) :-
+    ( memberchk(attr(R1, N1, _), Kin),
+      \+ memberchk(attr(R2, N2, _), Kin)
+    -> K1 = [attr(R2, N2, _) | Kin]
+    ; K1 = Kin ),
+    ( memberchk(attr(R2, N2, _), K1),
+      \+ memberchk(attr(R1, N1, _), K1)
+    -> Kout = [attr(R1, N1, _) | K1]
+    ; Kout = K1 ).
+
+add_attr_propagation(Expr, Kin, Kout) :-
+    Expr =.. [Op, A1, A2],
+    member(Op, [=, >, <, >=, =<]),
+    update_known_attr(A1, Kin, Kmid),
+    update_known_attr(A2, Kmid, Kout).
+
+add_attr_propagation(_, Kin, Kin).
+
+update_known_attr(attr(R, N, _), Kin, [attr(R, N, _) | Kin]) :-
+    \+ memberchk(attr(R, N, _), Kin), !.
+update_known_attr(_, Kin, Kin).
+
 
 
 check_if_pk([],K,K).
@@ -1579,7 +1589,7 @@ check_if_pk([(Rname, [Rel | _])|Rels], Kin, Kout):-
 
 
 loop_add_check(Cond, Rels,Kin, KoutFinal) :-
-  add(Cond, Kin, Kmid),      
+  add_attr_propagation(Cond, Kin, Kmid),      
   check_if_pk(Rels, Kmid, Kout), 
   msort(Kin, SortedKin),
   msort(Kout, SortedKout),
@@ -1663,7 +1673,7 @@ check_group_by_and_having((select(_D,_T,_Of,_Cs,_TL,_F,_W,group_by(G),having(H),
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by(G),_H,_O),_AS), Closure):-
   G \== [],
   extract_fds_from_relations(Rels,[], Edges),
-  add4(Cond, Edges, Edges2),
+  add_edges_from_equalities(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure),
   extract_pks_and_ck_from_gby(Rels, G, [], K), 
@@ -1682,7 +1692,7 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(
 % To save transitive closure for next errors
 check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(Cond),group_by([]),_H,_O),_AS), Closure):-
   extract_fds_from_relations(Rels,[], Edges),
-  add4(Cond, Edges, Edges2),
+  add_edges_from_equalities(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure).
 
@@ -1776,32 +1786,12 @@ get_attr_from_subq_equality('=_all'((select(_D,_T,_Of,_Cs,_TL,_F,_W,_G,_H,_O),_A
 
 check_if_attr_grp_by_is_unnec((select(_D,_T,_Of,Cs,_TL,from(Rels),_W,group_by(Group),having(Having),_O),_AS), Closure):-
   extract_attributes(Cs, Rels,Kselect),      
-  add2(Having, [], Khave),            
+  add_attr_propagation(Having, [], Khave),            
   merge_lists(Kselect, Khave, K),    
   extract_attr_from_group_order_by(Group, GAttrs),
   check_redundant_attributes_gby(GAttrs, Closure, K). 
 check_if_attr_grp_by_is_unnec(_SQLst, _Closure).
 
-% Add for Having attributes
-add2(Expr, Kin, Kout) :-
-    Expr =.. [Op, attr(R, N, _), _],
-    member(Op, [=, >, <, >=, =<]),
-    ( \+ memberchk(attr(R, N, _), Kin)
-    -> Kout = [attr(R, N, _)|Kin]
-    ;  Kout = Kin).
-
-add2(Expr, Kin, Kout) :-
-    Expr =.. [Op, _, attr(R, N, _)],
-    member(Op, [=, >, <, >=, =<]),
-    ( \+ memberchk(attr(R, N, _), Kin)
-    -> Kout = [attr(R, N, _)|Kin]
-    ;  Kout = Kin).
-
-add2(and(C1, C2), Kin, Kout) :-
-    add2(C1, Kin, Kmid),
-    add2(C2, Kmid, Kout).
-
-add2(_, Kin, Kin).
 
 
 check_redundant_attributes_gby(C, Closure, K) :-
@@ -1976,14 +1966,14 @@ check_redundant_attributes(C, Closure) :-
       )).
 
 % Add for A=B
-add4(attr(Rel1,Name1,Id1) = attr(Rel2,Name2,Id2), Kin, Kout):-
-  Kmid = [edge(attr(Rel2,Name2,Id2), attr(Rel1,Name1,Id1)) | Kin],
-  Kout = [edge(attr(Rel1,Name1,Id1), attr(Rel2,Name2,Id2)) | Kmid].
-  
-add4(and(C1,C2), Kin,Kout):-
-  add4(C1, Kin, Kin1),
-  add4(C2, Kin1,Kout).
-add4(_, K,K).
+add_edges_from_equalities(and(C1, C2), Kin, Kout) :-
+    add_edges_from_equalities(C1, Kin, Kmid),
+    add_edges_from_equalities(C2, Kmid, Kout).
+
+add_edges_from_equalities(attr(R1, N1, I1) = attr(R2, N2, I2), Kin, [edge(attr(R1, N1, I1), attr(R2, N2, I2)),edge(attr(R2, N2, I2), attr(R1, N1, I1)) | Kin]).
+
+add_edges_from_equalities(_, K, K).
+
 
 
 
