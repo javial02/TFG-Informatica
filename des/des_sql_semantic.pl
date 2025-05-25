@@ -1977,9 +1977,11 @@ check_redundant_attributes_oby(C, Closure) :-
 
 
 %% Error 23: UNION can be replace by OR
+%% This error could not be tested because DES is not developed to deal with UNION queries yet.
 %%     Examples: 
 %%      (select * from t) union (select * from t);
-%%check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
+%%      check_if_union_by_or(union(distinct,  (select(all, top(all), no_offset, [expr(attr('$t0', a, _115578), '$a1', _115440)], [], from([(t, ['$t0', attr(t, a, '$a0')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t1'|_121696]),  (select(all, top(all), no_offset, [expr(attr('$t2', a, _118972), '$a3', _118858)], [], from([(t, ['$t2', attr(t, a, '$a2')])]), where(true), group_by([]), having(true), order_by([], [])), ['$t3'|_122360])), ['$t4', attr('$t0', a, '$a1')])
+%%      [((answer(_83666):-distinct(answer_1_2(_83666))), ['A'=_83666]),  ((answer_1_2(_83640):-t(_83640)), ['A'=_83640]),  ((answer_1_2(_83588):-t(_83588)), ['A'=_83588])]
 
 %% check_if_union_by_or((union(_A, SQLst1, SQLst2), _AS), Bss):-
 %%   SQLst1 = (select(_D1,_T1,_Of1,Cs1,_TL1,from(Rels1),where(Cond1),_G1,_H1,_O1),_AS1),
@@ -1995,16 +1997,17 @@ check_redundant_attributes_oby(C, Closure) :-
 %%   sort(Rels2Names, Rels2NamesSorted),
 %%   Rels1NamesSorted == Rels2NamesSorted,
 %%   check_union_dlog(Bss, Bs),
-%%   check_sql_null_tautological_inconsistent_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3), Rs),
+%%   check_sql_null_tautological_inconsistent_condition((select(_D3,_T3,_Of3,_Cs3,_TL3,from(Rels1),where(and(Cond1, Cond2)),_G3,_H3,_O3),_AS3), Bs),
 %%   sql_semantic_error_warning(['UNION can be replaced by OR.']).
-%% check_if_union_by_or(_SQLst).
+%% check_if_union_by_or(_SQLst, _Bss).
 
-%% equal_attr_name([],[]).
+
+%% equal_attr_name([], []).
 %% equal_attr_name([attr(_,Name1,_)|Atts1], [attr(_,Name2,_)|Atts2]) :-
 %%   Name1 == Name2,
 %%   equal_attr_name(Atts1, Atts2).
 
-%% extract_rels([],[]).
+%% extract_rels([], []).
 %% extract_rels([(Rname, _)|Rels], [Rname|Rnames]):-
 %%   extract_rels(Rels, Rnames).
 
@@ -2015,10 +2018,14 @@ check_redundant_attributes_oby(C, Closure) :-
 %%   append(B1s, B2s, Bs).
 
 %% unify_tables([T|B1s], B2s):-
-%%   my_table('$des',T,_),
-%%   unify_table_list(T,B2s).
+%%   (my_table('$des', T, _) ->
+%%   unify_table_list(T, B2s)
+%%   ; true),
+%%   unify_tables(B1s, B2s).
 
-%% unify_table_list(T, [T | B2s]):-
-%%  !.
+%% unify_table_list(T, [T | _]):-
+%%   !.
 %% unify_table_list(T, [_ | B2s]):-
 %%   unify_table_list(T, B2s).
+
+
