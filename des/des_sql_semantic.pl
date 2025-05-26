@@ -1465,7 +1465,6 @@ sql_semantic_error_warning(Message) :-
   write_warning_log(['[Sem] '|ContMessage]).
 
 
-
 %% Javier Amado Lázaro starts from here
 
 %% Error 2: Unnecesary DISTINCT
