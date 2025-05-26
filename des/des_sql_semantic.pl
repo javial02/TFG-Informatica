@@ -966,7 +966,7 @@ check_sql_tautological_condition(Condition,Rs,ARs,ExpandCtrs) :-
 check_sql_null_tautological_inconsistent_condition((select(_AD,_T,_Of,_Cs,_TL,from(Rels),_W,_G,_H,_O),_AS), Rs):-
   extract_not_nullable_tables(Rels, [], Tnames),
   check_sql_null_tautological_inconsistent_condition_rs(Rs, Tnames).
-check_sql_null_tautological_inconsistent_condition(_SQLst, []).
+check_sql_null_tautological_inconsistent_condition(_SQLst, _Rs).
 
 %Extract names of not nullable tables to cover fake positives
 extract_not_nullable_tables([], K, K).
@@ -1698,6 +1698,8 @@ check_group_by_with_singleton_groups((select(_D,_T,_Of,_Cs,_TL,from(Rels),where(
   add_edges_from_equalities(Cond, Edges, Edges2),
   sort(Edges2, EdgesSorted),
   transitive_closure(EdgesSorted, Closure).
+
+check_group_by_with_singleton_groups(_SQLst, _Closure).
 
 % To extract PKs, CKs
 extract_pks_and_ck_from_gby([], _, K, K).
