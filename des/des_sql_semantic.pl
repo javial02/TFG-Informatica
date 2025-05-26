@@ -1486,9 +1486,10 @@ check_sql_unnec_distinct((select(D,_T,_Of,Cs,_TL,from(Rels),where(Cond),group_by
   (G == [] 
     -> (check_if_key_is_included(X3, Rels, [], Kout), Kout \== [])
     ;
-    check_if_group_by_in_k(X3, G)),
-  !,
-  sql_semantic_error_warning(['Using unnecessary DISTINCT.']).
+    (check_if_group_by_in_k(X3, G) 
+    -> sql_semantic_error_warning(['Using unnecessary DISTINCT because of GROUP BY.'])
+    ; true)).
+  %sql_semantic_error_warning(['Using unnecessary DISTINCT.']).
 check_sql_unnec_distinct(_SQLst).
 
 %% Extract attributes from SELECT clause, handling '*' as all attributes
