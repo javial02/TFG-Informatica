@@ -1163,8 +1163,8 @@ check_sql_complicated_exists(_SQLst).
 %%   Examples:
 %%     create or replace table t(a int primary key, b int unique, c int);
 %%     select sum(distinct a)-avg(distinct b) from t where b>1 GROUP BY a,b HAVING count(a)>1;
-%%       Warning: Unnecesary DISTINCT in aggregate SUM for a key argument.
-%%       Warning: Unnecesary DISTINCT in aggregate AVG for a key argument.
+%%       Warning: Unnecessary DISTINCT in aggregate SUM for a key argument.
+%%       Warning: Unnecessary DISTINCT in aggregate AVG for a key argument.
 %%     select min(distinct c) from t;
 %%       Warning: [Sem] DISTINCT should not be applied to the argument of MIN.
 %%       This error is identified while parsing in des_sql.pl
@@ -1189,7 +1189,7 @@ check_sql_distinct_aggregate(Rs,Bss) :-
     (my_primary_key('$des',Rel,Atts) ; my_candidate_key('$des',Rel,Atts)),
     project_tuple(UPCall,Atts,PArgs),
     my_set_diff(PArgs,[V],[]), % Warning: Extend this to several variables when expressions are allowed as aggregate arguments
-    sql_semantic_error_warning(['Unnecesary DISTINCT in aggregate ',UF,' for a key argument.']),
+    sql_semantic_error_warning(['Unnecessary DISTINCT in aggregate ',UF,' for a key argument.']),
     fail % Request other possible occurrences
   ).    
 check_sql_distinct_aggregate(_Rs,_Bss).
@@ -1213,7 +1213,7 @@ user_predicate_along_goal_call(Goal,Rs,UPCall) :-
 %%   Examples:
 %%     create or replace table t(a int, b int, c int, unique (a,b));
 %%     select count(a) from t where b>1 GROUP BY a,b HAVING count(a)>1;
-%%       Warning: Unnecesary argument in COUNT because it cannot be NULL. Consider using COUNT(*) instead.
+%%       Warning: Unnecessary argument in COUNT because it cannot be NULL. Consider using COUNT(*) instead.
 %%     select count(c) from t where c=1;
 %%       This would be warned if simplification would made to work on group_by goal argument
 %%     select count(c) from t;
@@ -1242,12 +1242,12 @@ check_sql_not_null_count(_Rs,_Bss).
 % The argument of count is part of a key
 check_sql_not_null_count_reason(count, V, PArgs, Reason) :-
   my_set_diff([V],PArgs,[]), % Check if the COUNT argument is part of a key
-  sql_semantic_error_warning(['Unnecesary argument of COUNT because it cannot be null due to a ',Reason,'.']),
+  sql_semantic_error_warning(['Unnecessary argument of COUNT because it cannot be null due to a ',Reason,'.']),
   !.
 % The argument of count_distinct coincides with a key
 check_sql_not_null_count_reason(count_distinct, V, PArgs, _Reason) :-
   [V]==PArgs,
-  sql_semantic_error_warning(['Unnecesary DISTINCT in COUNT because it applies to a key.']).
+  sql_semantic_error_warning(['Unnecessary DISTINCT in COUNT because it applies to a key.']).
 
 
 %% Error 27: Missing join condition
@@ -1467,7 +1467,7 @@ sql_semantic_error_warning(Message) :-
 
 %% Javier Amado Lázaro starts from here
 
-%% Error 2: Unnecesary DISTINCT
+%% Error 2: Unnecessary DISTINCT
 %%    Examples:
 %%      create or replace table t(a int primary key);
 %%      select distinct a from t group by a;
@@ -1633,7 +1633,7 @@ check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
 
 
 
-%% Error 18: Unnecesary GROUP BY in EXISTS subquery
+%% Error 18: Unnecessary GROUP BY in EXISTS subquery
 %%   Examples:
 %%    create table t(a int) 
 %%    create table s(a int, b int)
@@ -1642,7 +1642,7 @@ check_if_group_by_in_k(K, [expr(attr(_,Attr,_),_,_) | Gps]):-
 check_group_by_in_exists_subqry((select(_D,_T,_Of,_Cs,_TL,_F,where(exists((Cond))),_G,_H,_O),_AS)):-
   check_group_by_and_having(Cond),
   !,
-  sql_semantic_error_warning(['Using unnecesary GROUP BY in EXISTS subquery.']).
+  sql_semantic_error_warning(['Using unnecessary GROUP BY in EXISTS subquery.']).
 
 check_group_by_in_exists_subqry(_SQLst).
 

@@ -13,6 +13,6 @@ select a, b from t group by a, b, c;
 create or replace table t(a int, b int determined by a);
 select a, b from t group by a, b;
 
-create or replace table t(a int primary key, b int)
+create or replace table t(a int primary key, b int);
 select a, b from t where a = b group by a, b;
 
